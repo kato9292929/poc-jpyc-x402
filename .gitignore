@@ -1,0 +1,9 @@
+node_modules/
+.env
+.env.*
+!.env.example
+# ログは実ウォレットの tx を含むためコミットしない
+log/*
+!log/.gitkeep
+*.key
+*.pem
