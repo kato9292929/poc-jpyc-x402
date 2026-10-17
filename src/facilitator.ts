@@ -4,19 +4,26 @@ import type { FacilitatorKind } from './log.ts';
 
 /**
  * FACILITATOR_URL の facilitator（/verify・/settle・/supported）に繋ぐ。
- * A = CDP（認証ヘッダが要る）、B = 自前ホスト（OSS の JPYC 用 facilitator 等）。どちらも x402 v2 の HTTP API で同じコードで動く。
+ * A = CDP（CDP の JWT 認証ヘッダ）、B = 自前ホスト（Bearer トークン。vercel/facilitator）。どちらも x402 v2 の HTTP API。
  */
 export function createFacilitator(args: {
   url: string;
   kind: FacilitatorKind;
   cdpApiKeyId?: string;
   cdpApiKeySecret?: string;
+  bearerToken?: string;
   timeoutMs?: number;
 }): FacilitatorClient {
+  const bearer = args.bearerToken
+    ? async () => {
+        const h = { Authorization: `Bearer ${args.bearerToken}` };
+        return { verify: h, settle: h, supported: h };
+      }
+    : undefined;
   return new HTTPFacilitatorClient({
     url: args.url,
-    timeoutMs: args.timeoutMs ?? 60_000,
-    createAuthHeaders: args.kind === 'cdp' ? createCdpAuthHeaders(args.cdpApiKeyId, args.cdpApiKeySecret) : undefined,
+    timeoutMs: args.timeoutMs ?? 50_000,
+    createAuthHeaders: args.kind === 'cdp' ? createCdpAuthHeaders(args.cdpApiKeyId, args.cdpApiKeySecret) : bearer,
   });
 }
 

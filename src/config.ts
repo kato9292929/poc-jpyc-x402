@@ -18,6 +18,8 @@ export interface GatewayConfig {
   facilitatorKind: FacilitatorKind;
   cdpApiKeyId?: string;
   cdpApiKeySecret?: string;
+  /** B（自前ホストの facilitator）に送る Bearer トークン */
+  facilitatorAuthToken?: string;
   polygonRpcUrl?: string;
   payTo: `0x${string}`;
   upstreamJinBaseUrl: string;
@@ -61,6 +63,7 @@ export function loadGatewayConfig(env: NodeJS.ProcessEnv = process.env): Gateway
     facilitatorKind: facilitatorKindOf(facilitatorUrl, env.FACILITATOR_KIND || undefined),
     cdpApiKeyId: env.CDP_API_KEY_ID || undefined,
     cdpApiKeySecret: env.CDP_API_KEY_SECRET || undefined,
+    facilitatorAuthToken: env.FACILITATOR_AUTH_TOKEN || undefined,
     polygonRpcUrl: env.POLYGON_RPC_URL || undefined,
     payTo: getAddress(payToRaw),
     upstreamJinBaseUrl: (env.UPSTREAM_JIN_BASE_URL || 'https://jin.x402jp.com').replace(/\/+$/, ''),

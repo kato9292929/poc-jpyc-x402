@@ -7,3 +7,6 @@ log/*
 !log/.gitkeep
 *.key
 *.pem
+.vercel-stage/
+.vercel/
+VERCEL_LOGIN.md
