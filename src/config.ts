@@ -72,8 +72,9 @@ export function loadGatewayConfig(env: NodeJS.ProcessEnv = process.env): Gateway
     blobReadWriteToken: env.BLOB_READ_WRITE_TOKEN || undefined,
     logDir: env.LOG_DIR || 'log',
   };
+  // CDP のキーが無いと verify が認証エラーで落ちる（支払いは起きない）。402 の確認だけ先に行えるよう、起動は止めずに警告する
   if (cfg.facilitatorKind === 'cdp' && (!cfg.cdpApiKeyId || !cfg.cdpApiKeySecret)) {
-    throw new Error('CDP facilitator requires CDP_API_KEY_ID and CDP_API_KEY_SECRET');
+    console.warn('[config] CDP facilitator without CDP_API_KEY_ID / CDP_API_KEY_SECRET: verify will fail until they are set');
   }
   if (cfg.logSink !== 'blob' && cfg.logSink !== 'file') throw new Error('LOG_SINK must be blob or file');
   // ローカルファイルへの出力は開発時だけ（poc-card-credits と同じ規則）

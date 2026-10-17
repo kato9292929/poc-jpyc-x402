@@ -31,7 +31,7 @@ test('facilitator の種別は URL から判定', () => {
   assert.equal(facilitatorKindOf('https://api.cdp.coinbase.com/platform/v2/x402'), 'cdp');
   assert.equal(facilitatorKindOf('https://jpyc-facilitator.example.com'), 'self');
   assert.equal(facilitatorKindOf('https://x.example', 'cdp'), 'cdp');
-  assert.throws(() => loadGatewayConfig({ ...base, FACILITATOR_URL: 'https://api.cdp.coinbase.com/platform/v2/x402' }), /CDP_API_KEY/);
+  assert.equal(loadGatewayConfig({ ...base, FACILITATOR_URL: 'https://api.cdp.coinbase.com/platform/v2/x402' }).facilitatorKind, 'cdp');
 });
 
 test('価格は環境変数で変えられる（初期値 2 / 3）', () => {
