@@ -19,7 +19,8 @@
     "test": "tsx --test test/*.test.ts",
     "verify:simulate": "tsx scripts/simulate-verify.ts",
     "vercel:stage": "node scripts/vercel-stage.mjs",
-    "facilitator:serve": "tsx scripts/facilitator-serve.ts"
+    "facilitator:serve": "tsx scripts/facilitator-serve.ts",
+    "balances": "tsx scripts/balances.ts"
   },
   "dependencies": {
     "@coinbase/x402": "2.1.0",
