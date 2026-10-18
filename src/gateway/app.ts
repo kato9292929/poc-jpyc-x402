@@ -11,8 +11,8 @@ import { JinUpstreamBuyer } from '../upstream.ts';
 import { createHandler } from './handler.ts';
 
 /**
- * ゲートウェイの express アプリ。ローカル（server.ts）と Vercel（vercel/gateway/api/index.ts）の両方から使う。
- * サーバーレスでは 1 リクエストごとにプロセスが終わる可能性があるので、応答の前にログの書き込みを待つ。
+ * ゲートウェイの express アプリ（起動は server.ts）。
+ * flushLogBeforeResponse：プロセスが応答直後に止まる環境（サーバーレス等）向けに、応答の前にログの書き込みを待つ。
  */
 export async function createGatewayApp(cfg: GatewayConfig = loadGatewayConfig(), opts: { flushLogBeforeResponse?: boolean } = {}) {
   const routes = loadRoutes();

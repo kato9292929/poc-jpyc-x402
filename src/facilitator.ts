@@ -4,7 +4,7 @@ import type { FacilitatorKind } from './log.ts';
 
 /**
  * FACILITATOR_URL の facilitator（/verify・/settle・/supported）に繋ぐ。
- * A = CDP（CDP の JWT 認証ヘッダ）、B = 自前ホスト（Bearer トークン。vercel/facilitator）。どちらも x402 v2 の HTTP API。
+ * A = CDP（CDP の JWT 認証ヘッダ）、B = 自前ホスト（Bearer トークン。src/facilitator-server.ts）。どちらも x402 v2 の HTTP API。
  */
 export function createFacilitator(args: {
   url: string;

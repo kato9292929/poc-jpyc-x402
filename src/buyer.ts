@@ -1,6 +1,6 @@
 /**
  * 買い手エージェント（指示書 §4 Phase 1・2）。JPYC（Polygon）でゲートウェイの /jin/series・/jin/movers を買う。
- * 1 回の実行で paths を 1 回ずつ購入して終わる。ローカルの CLI（agents/buyer/index.ts）と Vercel Cron（vercel/buyer）から呼ぶ。
+ * 1 回の実行で paths を 1 回ずつ購入して終わる。CLI は agents/buyer/index.ts。
  *
  * - 1 日（JST）の支出上限 dailyCapJpyc。署名する前に判定し、超えるなら支払わずに終了する
  * - 支出は署名した時点で計上する。送金されていないことが確実な応答（402 など）のときだけ戻す

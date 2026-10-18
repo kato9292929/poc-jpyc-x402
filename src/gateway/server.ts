@@ -1,7 +1,7 @@
 import { supportsExact } from '../facilitator.ts';
 import { createGatewayApp } from './app.ts';
 
-// ローカル起動（npm run gateway）。Vercel では vercel/gateway/api/index.ts から createGatewayApp を使う
+// ゲートウェイの起動（npm run gateway）
 const { app, log, facilitator, cfg } = await createGatewayApp();
 
 // 起動時に /supported を確かめる。exact + 対象ネットワークが無ければ支払いを受けても settle できないので起動しない

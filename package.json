@@ -18,7 +18,6 @@
     "typecheck": "tsc --noEmit",
     "test": "tsx --test test/*.test.ts",
     "verify:simulate": "tsx scripts/simulate-verify.ts",
-    "vercel:stage": "node scripts/vercel-stage.mjs",
     "facilitator:serve": "tsx scripts/facilitator-serve.ts",
     "balances": "tsx scripts/balances.ts"
   },
@@ -38,7 +37,6 @@
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/node": "^22.0.0",
-    "esbuild": "^0.28.2",
     "tsx": "^4.20.0",
     "typescript": "^5.9.3"
   }

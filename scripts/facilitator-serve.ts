@@ -1,4 +1,4 @@
-// B の facilitator をローカルで起動する（動作確認用）。本番は vercel/facilitator
+// B の facilitator（src/facilitator-server.ts）を起動する。CDP が通らなかったときの予備
 import 'dotenv/config';
 import { createFacilitatorApp, loadFacilitatorServerConfig } from '../src/facilitator-server.ts';
 const { app, relayer } = createFacilitatorApp(loadFacilitatorServerConfig());

@@ -26,103 +26,75 @@ JIN（jin.x402jp.com）を既存の x402（Solana / USDC）で購入    src/upst
 
 | 項目 | 決定 | 理由・根拠 |
 |---|---|---|
-| 対象チェーン | Polygon のみ（`eip155:137`、Phase 0 は `eip155:80002`） | 指示書 §0。Ethereum・Avalanche・Kaia は対象外 |
-| 販売エンドポイント | `/jin/latest`（0）・`/jin/series`（2 JPYC）・`/jin/movers`（3 JPYC） | 指示書 §1 の初期値。`PRICE_SERIES_JPYC` / `PRICE_MOVERS_JPYC` で変更可 |
-| JPYC の EIP-712 domain | `name: "JPY Coin"` / `version: "1"` | 2026-10-15 に mainnet・Amoy の両方で、この domain の署名をコントラクトが受け入れることを確認した（`npm run jpyc:domain-check`。`"2"` や `"JPYC"` では `EIP3009: invalid signature` で revert）。コントラクトには `version()` が無いので、facilitator 側は 402 の `extra` の値を使う |
-| facilitator | **未確定：A（CDP）から試す** | 下の「facilitator の選定」を参照。実機での確認後にこの欄を更新する |
-| Phase 0（Amoy） | **未確定** | 下の「Phase 0」を参照 |
-| Phase 1 の settle tx | **未実施**（記入欄：`https://polygonscan.com/tx/<hash>`） | 買い手ウォレットへの JPYC 入金後に実施する |
+| 対象チェーン | Polygon mainnet のみ（`eip155:137`） | 指示書 §0 |
+| 販売エンドポイント・価格 | `/jin/latest`（0）・`/jin/series`（2 JPYC）・`/jin/movers`（3 JPYC） | 初期値のまま。`PRICE_SERIES_JPYC` / `PRICE_MOVERS_JPYC` で変更可 |
+| JPYC の EIP-712 domain | `name: "JPY Coin"` / `version: "1"` | mainnet・Amoy の両方で、この domain の署名をコントラクトが受け入れることを確認（`npm run jpyc:domain-check`）。コントラクトに `version()` は無い |
+| facilitator | **A（CDP Facilitator）を採用** | `/supported` に `eip155:137` の `exact` があり、JPYC で verify / settle が 2 件とも 1 回で通った（下表）。B は使っていない |
+| B（自前ホスト） | 予備として実装のみ（`src/facilitator-server.ts`、`npm run facilitator:serve`） | x402 の参照実装（`@x402/evm`）を使用。CDP が使えなくなったときに `FACILITATOR_URL` を向け替える。relayer ウォレット `0x41ff0e098Cd675ACe5F1BdCf58042cDE9e802BBd`（Polygon、POL 0.5 入金済み・未使用） |
+| Phase 0（Amoy） | **実施しない** | 指示書2の決定。mainnet を少額で行った |
+| 実行場所 | ゲートウェイ・買い手ともに作業用コンテナ内（`localhost`） | 指示書2の決定。Vercel へのデプロイは行っていない |
+| Phase 2（定期実行） | **今回は実施しない** | 指示書2の決定。買い手スクリプトは 1 日 1 回の判定（`BUYER_ONCE_PER_DAY`）と日次上限（`BUYER_DAILY_CAP_JPYC=20`）を持つので、cron 等から起動すればそのまま使える |
 
-### facilitator の選定（§3）
+### Phase 1 の結果（2026-10-18、Polygon mainnet、facilitator = CDP）
 
-コードは `FACILITATOR_URL` だけで A・B を切り替えられる（どちらも x402 v2 の `/verify`・`/settle`・`/supported`）。
-決済ログの `facilitator` 列は URL から自動で `cdp` / `self` になる（`FACILITATOR_KIND` で上書き可）。
+| | `/jin/series` | `/jin/movers` |
+|---|---|---|
+| settle tx（Polygon） | [0x7699b2e4…57da](https://polygonscan.com/tx/0x7699b2e469efbd6c2804974bfcac632e4ddb4e6827263bbf113fbf44f86757da) | [0x15e175b5…6ae1](https://polygonscan.com/tx/0x15e175b5f09357cacabeacd4ef98966f2406d93703d93f2316615a2311c46ae1) |
+| JPYC の着金 | payTo に 2 JPYC（`npm run tx:check` で確認） | payTo に 3 JPYC（同） |
+| 上流購入 tx（Solana） | [4Zpoi29V…EYaY](https://solscan.io/tx/4Zpoi29VQXw6yCFcYnuh24oWYxoNbUgLtYNJD96yZRtsRvHdQ6cN8uHxNEvYCi5bHVhx6oqjysnyAUNFRREpEYaY) | [3rfdR3pe…TirP](https://solscan.io/tx/3rfdR3peDQsEaR6wm2r4txZDGnhJx1BcGSgppjtZqRV8b2WyB1q7yif3F1AkDPpnFhMXbbrPp6p4UQ9sCtB9TirP) |
+| settle_ms（verify 開始〜settle 完了） | 2,532 | 1,995 |
+| 買い手に返ったデータ | JIN series（200） | JIN movers（200） |
+| 決済ログ | `status=ok` 1 行 | `status=ok` 1 行 |
 
-- **A（CDP Facilitator）**：この作業環境からは CDP の API キーが無いため `/supported` が `401 Unauthorized` で、
-  `eip155:137` + `exact` の掲載を確かめられていない。API キーを入れて次を実行する：
-  ```sh
-  FACILITATOR_URL=https://api.cdp.coinbase.com/platform/v2/x402 CDP_API_KEY_ID=... CDP_API_KEY_SECRET=... npm run facilitator:check
-  ```
-  `OK` が出たら、Phase 1 の手順で JPYC の verify / settle を 1 回通す。落ちたらエラー内容（決済ログの `error` 列にも出る）をここに書いて B に切り替える。
-- **B（自前ホスト）**：第一候補は `github.com/Mameta29/jpyc-x402-facilitator`。この作業環境からはリポジトリを読めなかったので、
-  中身は未確認。relayer ウォレットに POL を入れてガスを負担する。
-  なお、x402 の参照実装（`@x402/evm` の facilitator）を Polygon の RPC につないだだけでも、このゲートウェイの 402 に対して
-  作った JPYC の支払いが署名・domain・金額の検査を通り、残高チェックまで進むことを確認した
-  （`npm run verify:simulate`：使い捨ての鍵なので結果は `invalid_exact_evm_insufficient_balance` になる。mainnet・Amoy とも同じ）。
-  Mameta29 版が使えない場合の代わりにできる。
+アドレス：買い手 `0x91Cb1df115c14298BE06Cd80B7D2D41ac5E659cA`、受取（payTo）`0xb04c275C85ddb34CdF1A6f48A4A749f969377a6e`、
+上流購入（Solana）`3EX6L11khPXTRC6wdRbrEibHi8tH7TZ1PRTYSX7R218f`（poc-card-credits のゲートウェイ鍵とは別に新規作成）。
 
-### Phase 0（Amoy）
+### 1 件あたりの実費
 
-- JPYC のコントラクトは Amoy にも同じアドレスで存在する（`name()` = `JPY Coin`、`decimals()` = 18、発行量あり）。
-- テスト用 JPYC を入手する手段（faucet 等）は、この作業環境からは確認できていない。
-  入手できたら `JPYC_NETWORK=eip155:80002` でゲートウェイと買い手を起動し、402 → 署名 → verify → settle → 200 を一周させる。
-- 入手できない場合は Phase 0 を飛ばし、Phase 1 を少額（1〜3 JPYC）で行う。どちらにしたかをこの欄に書く。
+| | `/jin/series` | `/jin/movers` |
+|---|---|---|
+| 受領（JPYC） | 2 JPYC | 3 JPYC |
+| 上流原価（USDC、Solana） | $0.01 | $0.02 |
+| Solana の手数料 | 0（10,001 lamports は JIN 側の feePayer `CjNFTj…eKww` が負担） | 同左 |
+| Polygon のガス代 | 0（CDP の送信アドレスが負担。参考：0.0517 POL / 0.0445 POL） | 同左 |
+| facilitator 手数料 | CDP からの請求額は未確認（このコンテナからは請求情報を見られない） | 同左 |
 
-## 起動手順
+買い手は POL を持たずに支払えた（EIP-3009 の署名だけ）。上流購入用ウォレットの SOL（0.005）は減っていない。
 
-Node.js 22 以上。
+## 起動手順（コンテナ内で動かす）
+
+Node.js 22 以上。秘密鍵・API キーは gitignore 済みの env ファイルにだけ置き、役割ごとにファイルを分ける
+（ゲートウェイに買い手の鍵を置かないため。ゲートウェイは `BUYER_PRIVATE_KEY` があると起動しない）。
+
+| ファイル | 中身 |
+|---|---|
+| `.env.gateway` | `FACILITATOR_URL`・`CDP_API_KEY_ID`・`CDP_API_KEY_SECRET`・`JPYC_PAY_TO`・`UPSTREAM_SOLANA_PRIVATE_KEY`・`POLYGON_RPC_URL`・`NODE_ENV=development`・`LOG_SINK=file` |
+| `.env.buyer` | `BUYER_PRIVATE_KEY`・`GATEWAY_URL`・`BUYER_DAILY_CAP_JPYC=20`・`BUYER_ONCE_PER_DAY=1`・`BUYER_EXPECTED_PAY_TO` |
+| `.env.facilitator`（B のときだけ） | `RELAYER_PRIVATE_KEY`・`FACILITATOR_AUTH_TOKEN`・`FACILITATOR_ALLOWED_PAY_TO`・`POLYGON_RPC_URL` |
 
 ```sh
 npm install
-cp .env.example .env   # 値を入れる（.env はコミットしない）
-npm test               # ユニットテスト（ネットワーク不要）
-npm run typecheck
+npm test && npm run typecheck
+
+npm run wallet:new -- --solana   # 上流購入用（poc-card-credits の鍵とは別）
+npm run wallet:new -- --evm      # 買い手用・受取用・relayer 用
+
+DOTENV_CONFIG_PATH=.env.gateway npm run facilitator:check   # CDP が eip155:137 の exact に対応しているか
+DOTENV_CONFIG_PATH=.env.gateway npm run gateway             # 起動時にも /supported を確かめる
+DOTENV_CONFIG_PATH=.env.buyer BUYER_PATHS=/jin/series npm run buyer
+DOTENV_CONFIG_PATH=.env.gateway npm run tx:check -- <settle tx> 2
+npm run balances -- --polygon <買い手>,<payTo> --solana <上流購入用>
 ```
 
-### 鍵の用意
+B に切り替えるとき：`DOTENV_CONFIG_PATH=.env.facilitator npm run facilitator:serve` で起動し、`.env.gateway` の
+`FACILITATOR_URL=http://localhost:8790`・`FACILITATOR_KIND=self`・`FACILITATOR_AUTH_TOKEN`（facilitator と同じ値）に変える。
+B は relayer のガスを守るため、JPYC・`FACILITATOR_ALLOWED_PAY_TO`・`FACILITATOR_MAX_JPYC` 以下の要求しか受け付けない。
 
-```sh
-npm run wallet:new -- --solana   # 上流購入用 → UPSTREAM_SOLANA_PRIVATE_KEY（Solana mainnet の USDC を少額入れる）
-npm run wallet:new -- --evm      # 買い手用 → BUYER_PRIVATE_KEY（Polygon の JPYC を少額入れる）
-```
-
-- 上流購入用の鍵は poc-card-credits のゲートウェイ鍵と**別**にする（同じ環境に `GATEWAY_WALLET_SECRET` があり同じ値なら起動しない）
-- `JPYC_PAY_TO`（受取、x402 Inc. 管理）・上流購入用・買い手の 3 つは別のウォレットにする
-- `BUYER_PRIVATE_KEY` はゲートウェイの環境に置かない（置くとゲートウェイは起動しない）
-
-### ゲートウェイ
-
-```sh
-# 本番：ログは Vercel Blob（BLOB_READ_WRITE_TOKEN）
-FACILITATOR_URL=... JPYC_PAY_TO=0x... UPSTREAM_SOLANA_PRIVATE_KEY=... BLOB_READ_WRITE_TOKEN=... npm run gateway
-
-# 開発：ログをローカルファイル（log/YYYY-MM-DD.jsonl）に
-NODE_ENV=development LOG_SINK=file ... npm run gateway
-```
-
-- 起動時に facilitator の `/supported` に `exact` + `JPYC_NETWORK` があるかを確かめ、無ければ起動しない
-- `GET /healthz` で設定（ネットワーク・payTo・facilitator・上流ウォレット・価格）を確認できる
-
-### 買い手スクリプト
-
-```sh
-BUYER_PRIVATE_KEY=0x... GATEWAY_URL=https://<gateway> POLYGON_RPC_URL=... npm run buyer
-```
-
+買い手スクリプト：
 - 1 回の実行で `BUYER_PATHS`（既定 `/jin/series,/jin/movers`）を 1 回ずつ買って終わる
-- `BUYER_DAILY_CAP_JPYC`（既定 20）：JST の 1 日の支出上限。署名する前に判定し、超えるなら支払わずに終了する
-- 支出は署名した時点で計上し、送金されていないことが確実な応答（402 など）のときだけ戻す。
-  当日の支出は `log/buyer/buyer-YYYY-MM-DD.jsonl` から復元する
-- `BUYER_ONCE_PER_DAY`（既定 true）：同じ JST 日に購入済みのパスは買わない
-- Phase 1 では `BUYER_PATHS=/jin/series` で 1 回だけ実行する
-
-Phase 2（1 日 1 回の定期実行）は cron で起動する：
-
-```cron
-CRON_TZ=Asia/Tokyo
-7 9 * * * cd /path/to/poc-jpyc-x402 && npm run buyer >> log/buyer/cron.log 2>&1
-```
-
-### Phase 1 の確認
-
-完了条件と確認方法：
-
-| 条件 | 確認 |
-|---|---|
-| 402 の `accepts` に Polygon・JPYC・金額・payTo が正しく入っている | `curl -si $GATEWAY_URL/jin/series` の `PAYMENT-REQUIRED` / 本文（`amount` は `2000000000000000000`、`extra` は `JPY Coin` / `1`） |
-| settle の tx が Polygonscan で確認でき、JPYC が payTo に着金している | 買い手の出力の `polygonscan` リンク、`npm run tx:check -- <txHash> 2` |
-| 買い手に JIN の series データが返っている | 買い手の出力 |
-| 決済ログ 1 行が出力されている | `npm run logs:summary` |
+- `BUYER_DAILY_CAP_JPYC`（既定 20）：JST の 1 日の支出上限。署名する前に判定し、超えるなら支払わずに止まる
+- `BUYER_ONCE_PER_DAY`（既定 1）：同じ JST 日に購入済みのパスは買わない（パスごとのロックで二重起動も防ぐ）
+- 支出は署名した時点で計上し、送金されていないことが確実な応答（402 など）のときだけ戻す。記録は `log/buyer/YYYY-MM-DD.jsonl`
 
 ## 決済ログ
 
@@ -165,6 +137,7 @@ npm run logs:summary -- 2026-10-16
 
 - **上流の購入に失敗した場合は手動返金。** JPYC は受領済みなので `status=upstream_failed` で記録し、買い手には 502（本文に `settle_tx` と `refund: "manual"`）を返す。返金は自動化していない。件数と対象は `npm run logs:summary` で数える
 - **Polygon のみ。** 他チェーン・OSD のエンドポイントは対象外
+- **常駐していない。** 今回はコンテナ内で起動して実証した。外から呼べる公開 URL・定期実行は未設定
 - settle の通信がタイムアウトした場合は結果不明（facilitator 側では完了している可能性がある）。`settle_failed` で記録されるので、Polygonscan で買い手アドレスの JPYC の動きを確認する
 - nonce の再送防止はプロセス内メモリ。ゲートウェイを複数台で動かす場合は台をまたいで共有されない（チェーン側の二重使用防止が最後の砦）
 - 上流（JIN）の 402 の価格・資産（Solana mainnet の USDC）が `src/routes.ts` の原価と違う場合は、上流に支払わず `upstream_failed` になる
@@ -185,6 +158,7 @@ src/upstream.ts         JIN を x402（Solana / USDC）で購入
 src/gateway/handler.ts  1 リクエストの処理（402 → verify → settle → 上流 → ログ）
 src/gateway/server.ts   express の起動
 src/log.ts, src/logstore/  決済ログ（JSONL、JST、Vercel Blob / ローカルファイル）
-agents/buyer/index.ts   買い手エージェント（@x402/fetch + viem、日次上限）
-scripts/                facilitator・domain・settle tx の確認、ログ集計、鍵の作成
+src/buyer.ts            買い手エージェント（@x402/fetch + viem、日次上限・1日1回）。CLI は agents/buyer/index.ts
+src/facilitator-server.ts  B：自前ホストの facilitator（予備、未使用）
+scripts/                facilitator・domain・settle tx・残高の確認、ログ集計、鍵の作成
 ```
