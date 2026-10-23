@@ -1,0 +1,43 @@
+{
+  "name": "poc-jpyc-x402",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PoC: agents pay x402 per-call in JPYC (Polygon, EIP-3009); the gateway buys JIN upstream via x402 (Solana / USDC)",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "gateway": "tsx src/gateway/server.ts",
+    "buyer": "tsx agents/buyer/index.ts",
+    "facilitator:check": "tsx scripts/check-facilitator.ts",
+    "jpyc:domain-check": "tsx scripts/check-jpyc-domain.ts",
+    "tx:check": "tsx scripts/check-settle-tx.ts",
+    "logs:summary": "tsx scripts/log-summary.ts",
+    "wallet:new": "tsx scripts/new-wallet.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test test/*.test.ts",
+    "verify:simulate": "tsx scripts/simulate-verify.ts",
+    "facilitator:serve": "tsx scripts/facilitator-serve.ts",
+    "balances": "tsx scripts/balances.ts"
+  },
+  "dependencies": {
+    "@coinbase/x402": "2.1.0",
+    "@scure/base": "^2.4.0",
+    "@solana/kit": "^5.5.1",
+    "@vercel/blob": "2.8.1",
+    "@x402/core": "2.28.0",
+    "@x402/evm": "2.28.0",
+    "@x402/fetch": "2.28.0",
+    "@x402/svm": "2.28.0",
+    "dotenv": "^17.2.3",
+    "express": "^5.3.0",
+    "viem": "2.57.7"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.3"
+  }
+}
