@@ -1,0 +1,139 @@
+# 定期実行（指示書3）：毎日 06:30 JST に、ジョブ内でゲートウェイを localhost に起動し、
+# 買い手が /jin/series 20 回 + /jin/movers 20 回（= 100 JPYC）を買う。決済ログと summary.json をコミットする。
+#
+# 鍵は GitHub Secrets に役割ごとに分けて置く（ゲートウェイの手順にだけ GATEWAY_ENV、買い手の手順にだけ BUYER_ENV を渡す）。
+#   GATEWAY_ENV: CDP_API_KEY_ID / CDP_API_KEY_SECRET / UPSTREAM_SOLANA_PRIVATE_KEY（dotenv 形式）
+#   BUYER_ENV:   BUYER_PRIVATE_KEY（dotenv 形式）
+# 期間は RUN_START_JST〜RUN_UNTIL_JST（リポジトリ変数で上書き可）。期間外は何も支払わずに終わる。
+name: daily-buy
+
+on:
+  workflow_dispatch:
+  push:
+    # 初回の手動実行用（ワークフローがまだ main に無いため workflow_dispatch を使えない）。PR の前に外す
+    branches: [claude/keen-dirac-x07kt4]
+    paths: [ops/run-request.txt]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-buy
+  cancel-in-progress: false
+
+env:
+  RUN_START_JST: ${{ vars.RUN_START_JST || '2026-10-25' }}
+  RUN_UNTIL_JST: ${{ vars.RUN_UNTIL_JST || '2026-11-23' }}
+  JPYC_NETWORK: eip155:137
+  POLYGON_RPC_URL: https://polygon-bor-rpc.publicnode.com
+  SOLANA_RPC_URL: https://api.mainnet-beta.solana.com
+  JPYC_PAY_TO: '0xb04c275C85ddb34CdF1A6f48A4A749f969377a6e'
+  UPSTREAM_SOLANA_ADDRESS: 3EX6L11khPXTRC6wdRbrEibHi8tH7TZ1PRTYSX7R218f
+  GATEWAY_PORT: '8788'
+
+jobs:
+  buy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check run period (JST)
+        id: period
+        run: |
+          today=$(TZ=Asia/Tokyo date +%F)
+          echo "today=$today" >> "$GITHUB_OUTPUT"
+          if [[ "$today" < "$RUN_START_JST" || "$today" > "$RUN_UNTIL_JST" ]]; then
+            echo "outside the run period ($RUN_START_JST..$RUN_UNTIL_JST); not paying"
+            echo "active=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "active=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.period.outputs.active == 'true'
+
+      - uses: actions/setup-node@v4
+        if: steps.period.outputs.active == 'true'
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        if: steps.period.outputs.active == 'true'
+        run: npm ci
+
+      - name: Start gateway (localhost)
+        if: steps.period.outputs.active == 'true'
+        env:
+          GATEWAY_ENV: ${{ secrets.GATEWAY_ENV }}
+          PORT: ${{ env.GATEWAY_PORT }}
+          PUBLIC_BASE_URL: http://localhost:${{ env.GATEWAY_PORT }}
+          FACILITATOR_URL: https://api.cdp.coinbase.com/platform/v2/x402
+          UPSTREAM_JIN_BASE_URL: https://jin.x402jp.com
+          LOG_SINK: file
+          LOG_DIR: log
+        run: |
+          test -n "$GATEWAY_ENV" || { echo "missing secret GATEWAY_ENV"; exit 1; }
+          umask 077
+          printf '%s\n' "$GATEWAY_ENV" > "$RUNNER_TEMP/gateway.env"
+          DOTENV_CONFIG_PATH="$RUNNER_TEMP/gateway.env" nohup npx tsx src/gateway/server.ts > "$RUNNER_TEMP/gateway.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/gateway.pid"
+          for i in $(seq 1 60); do
+            curl -fs "http://localhost:$PORT/healthz" > /dev/null && { echo "gateway up"; exit 0; }
+            kill -0 "$(cat "$RUNNER_TEMP/gateway.pid")" 2>/dev/null || break
+            sleep 1
+          done
+          echo "gateway did not start"; tail -n 30 "$RUNNER_TEMP/gateway.log"; exit 1
+
+      - name: Buy (100 JPYC / day)
+        if: steps.period.outputs.active == 'true'
+        env:
+          BUYER_ENV: ${{ secrets.BUYER_ENV }}
+          GATEWAY_URL: http://localhost:${{ env.GATEWAY_PORT }}
+          BUYER_PLAN: /jin/series:20,/jin/movers:20
+          BUYER_INTERVAL_MS: '3000'
+          BUYER_DAILY_CAP_JPYC: '100'
+          BUYER_ONCE_PER_DAY: '0'
+          BUYER_MAX_FAILURES_PER_DAY: '5'
+          BUYER_EXPECTED_PAY_TO: ${{ env.JPYC_PAY_TO }}
+          BUYER_UPSTREAM_SOLANA_ADDRESS: ${{ env.UPSTREAM_SOLANA_ADDRESS }}
+          BUYER_LOG_DIR: log/buyer
+        run: |
+          test -n "$BUYER_ENV" || { echo "missing secret BUYER_ENV"; exit 1; }
+          umask 077
+          printf '%s\n' "$BUYER_ENV" > "$RUNNER_TEMP/buyer.env"
+          DOTENV_CONFIG_PATH="$RUNNER_TEMP/buyer.env" npx tsx agents/buyer/index.ts
+          rm -f "$RUNNER_TEMP/buyer.env"
+
+      - name: Stop gateway
+        if: always() && steps.period.outputs.active == 'true'
+        run: |
+          if [ -f "$RUNNER_TEMP/gateway.pid" ]; then
+            pid=$(cat "$RUNNER_TEMP/gateway.pid")
+            pkill -TERM -P "$pid" 2>/dev/null || true
+            kill -TERM "$pid" 2>/dev/null || true
+            sleep 3
+          fi
+          rm -f "$RUNNER_TEMP/gateway.env"
+          echo "--- gateway log (tail) ---"; tail -n 40 "$RUNNER_TEMP/gateway.log" 2>/dev/null || true
+
+      - name: Summary
+        if: always() && steps.period.outputs.active == 'true'
+        run: npx tsx scripts/summary.ts
+
+      - name: Commit logs and summary
+        if: always() && steps.period.outputs.active == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898299+github-actions[bot]@users.noreply.github.com"
+          # log/ は .gitignore 済み（ローカルの開発ログを入れないため）。定期実行の分だけ -f で追加する
+          shopt -s nullglob
+          files=(log/*.jsonl log/buyer/*.jsonl)
+          [ ${#files[@]} -gt 0 ] && git add -f "${files[@]}"
+          [ -f summary.json ] && git add summary.json
+          if git diff --cached --quiet; then echo "nothing to commit"; exit 0; fi
+          git commit -m "daily-buy: logs ${{ steps.period.outputs.today }}"
+          for i in 1 2 3; do
+            git pull --rebase -q origin "$GITHUB_REF_NAME" && git push -q origin "HEAD:$GITHUB_REF_NAME" && exit 0
+            sleep 5
+          done
+          exit 1

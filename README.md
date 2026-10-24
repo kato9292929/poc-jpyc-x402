@@ -33,7 +33,7 @@ JIN（jin.x402jp.com）を既存の x402（Solana / USDC）で購入    src/upst
 | B（自前ホスト） | 予備として実装のみ（`src/facilitator-server.ts`、`npm run facilitator:serve`） | x402 の参照実装（`@x402/evm`）を使用。CDP が使えなくなったときに `FACILITATOR_URL` を向け替える。relayer ウォレット `0x41ff0e098Cd675ACe5F1BdCf58042cDE9e802BBd`（Polygon、POL 0.5 入金済み・未使用） |
 | Phase 0（Amoy） | **実施しない** | 指示書2の決定。mainnet を少額で行った |
 | 実行場所 | ゲートウェイ・買い手ともに作業用コンテナ内（`localhost`） | 指示書2の決定。Vercel へのデプロイは行っていない |
-| Phase 2（定期実行） | **今回は実施しない** | 指示書2の決定。買い手スクリプトは 1 日 1 回の判定（`BUYER_ONCE_PER_DAY`）と日次上限（`BUYER_DAILY_CAP_JPYC=20`）を持つので、cron 等から起動すればそのまま使える |
+| 定期実行 | GitHub Actions の cron（毎日 06:30 JST、1 日 100 JPYC・30 日間） | 指示書3の決定。下の「定期実行」を参照 |
 
 ### Phase 1 の結果（2026-10-18、Polygon mainnet、facilitator = CDP）
 
@@ -95,6 +95,23 @@ B は relayer のガスを守るため、JPYC・`FACILITATOR_ALLOWED_PAY_TO`・`
 - `BUYER_DAILY_CAP_JPYC`（既定 20）：JST の 1 日の支出上限。署名する前に判定し、超えるなら支払わずに止まる
 - `BUYER_ONCE_PER_DAY`（既定 1）：同じ JST 日に購入済みのパスは買わない（パスごとのロックで二重起動も防ぐ）
 - 支出は署名した時点で計上し、送金されていないことが確実な応答（402 など）のときだけ戻す。記録は `log/buyer/YYYY-MM-DD.jsonl`
+
+## 定期実行（GitHub Actions、指示書3）
+
+`.github/workflows/daily-buy.yml`。毎日 06:30 JST に 1 回、ジョブ内でゲートウェイを localhost に起動し、買い手がそこから買う。
+
+| 項目 | 設定 |
+|---|---|
+| 1 日の購入 | `/jin/series` 20 回 + `/jin/movers` 20 回（交互、3 秒間隔）= 100 JPYC、上流原価 0.60 USDC |
+| 上限 | `BUYER_DAILY_CAP_JPYC=100`、1 日 1 回の制限（`BUYER_ONCE_PER_DAY`）は外す |
+| 期間 | `RUN_START_JST`〜`RUN_UNTIL_JST`（30 日。リポジトリ変数で上書き可）。期間外のジョブは何も支払わずに終わる |
+| 失敗 | verify・settle の失敗、上流の失敗（`upstream_failed`）はログに残して次へ。同じ日の失敗が 5 件を超えたら、その日の残りは支払わない |
+| 残高 | 始める前に、その日の計画分の JPYC（買い手）と USDC（上流購入用）があるかを確かめ、足りなければ支払わない |
+| 鍵 | GitHub Secrets：`GATEWAY_ENV`（CDP キー・上流購入用の鍵）はゲートウェイの手順だけ、`BUYER_ENV`（買い手の鍵）は買い手の手順だけに渡す |
+| 記録 | 決済ログ `log/YYYY-MM-DD.jsonl`、買い手の記録 `log/buyer/YYYY-MM-DD.jsonl`、集計 `summary.json` を毎日コミットする |
+
+`summary.json`：累計件数・status 別件数・成功率、settle 時間の中央値と最大、累計 JPYC（受領）、累計上流 USDC、
+CDP が負担したガス代の合計（settle tx の receipt から計算）。ローカルで作り直すときは `RUN_START_JST=... npx tsx scripts/summary.ts`。
 
 ## 決済ログ
 

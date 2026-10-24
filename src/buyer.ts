@@ -6,6 +6,11 @@
  * - 支出は署名した時点で計上する。送金されていないことが確実な応答（402 など）のときだけ戻す
  * - 当日の支出は買い手の記録（RecordStore）から復元する
  * - oncePerDay：同じ JST 日に購入済み（または購入中）のパスは買わない。二重起動に備えてパスごとにロックを取る
+ * - 定期実行（指示書3）向け：
+ *   - plan：同じパスを複数回買う順番（BUYER_PLAN=/jin/series:20,/jin/movers:20 → 交互に並べる）、intervalMs で間隔を空ける
+ *   - runUntilJst：この日（JST）を過ぎたら支払わずに終了する
+ *   - maxFailuresPerDay：同じ日の失敗（http_error / error）がこの件数を超えたら、その日の残りは支払わずに終了する
+ *   - checkFunds：始める前に、その日の残りの計画分の JPYC・上流 USDC が足りるかを確かめ、足りなければ支払わずに終了する
  */
 import { x402Client } from '@x402/core/client';
 import { decodePaymentResponseHeader, wrapFetchWithPayment } from '@x402/fetch';
@@ -16,13 +21,14 @@ import { polygon, polygonAmoy } from 'viem/chains';
 import { JPYC_ADDRESS, JPYC_EIP712, JPYC_NETWORKS, POLYGON_MAINNET, atomicToJpyc, jpycToAtomic, polygonscanTxUrl, type JpycNetwork } from './jpyc.ts';
 import { jstDay, jstIso } from './log.ts';
 import { parseLines } from './logstore/types.ts';
+import { usdToUsdcAtomic } from './routes.ts';
 
 export interface BuyerRecord {
   ts: string;
   path: string;
   /** 署名して送った額（JPYC）。署名しなかったら 0 */
   spent_jpyc: string;
-  status: 'ok' | 'http_error' | 'cap_exceeded' | 'error' | 'skipped_already_bought';
+  status: 'ok' | 'http_error' | 'cap_exceeded' | 'error' | 'skipped_already_bought' | 'stopped';
   http_status?: number;
   settle_tx?: string;
   polygonscan?: string;
@@ -43,6 +49,18 @@ export interface BuyerOptions {
   gatewayUrl: string;
   network?: JpycNetwork;
   paths?: string[];
+  /** 買う順番（同じパスの繰り返し可）。指定時は paths より優先 */
+  plan?: string[];
+  /** 1 回ごとの間隔（ミリ秒） */
+  intervalMs?: number;
+  /** 'YYYY-MM-DD'（JST）。この日を過ぎたら支払わない */
+  runUntilJst?: string;
+  /** 同じ日の失敗がこの件数を超えたら止める */
+  maxFailuresPerDay?: number;
+  /** 残りの計画に要る JPYC（atomic）と上流 USDC（atomic, 6 桁）を渡す。足りなければ理由を返す */
+  checkFunds?: (needJpycAtomic: bigint, needUsdcAtomic: bigint, buyerAddress: string) => Promise<string | undefined>;
+  /** パスごとの価格（JPYC）と上流原価（USD）。checkFunds の必要額の計算に使う */
+  costs?: Record<string, { priceJpyc: string; upstreamCostUsd: string }>;
   dailyCapJpyc?: string;
   oncePerDay?: boolean;
   expectedPayTo?: string;
@@ -61,6 +79,8 @@ export interface BuyerRunResult {
   capJpyc: string;
   balanceJpyc?: string;
   records: BuyerRecord[];
+  /** 途中で止めた理由（止めなければ undefined） */
+  stopReason?: string;
   /** 本文の先頭（確認用） */
   bodies: Record<string, string>;
 }
@@ -71,6 +91,18 @@ export function envFlag(v: string | undefined, dflt: boolean): boolean {
   if (/^(1|true|yes)$/i.test(v)) return true;
   if (/^(0|false|no)$/i.test(v)) return false;
   throw new Error(`invalid boolean "${v}"`);
+}
+
+/** "/jin/series:20,/jin/movers:20" → 交互に並べた 40 件の配列 */
+export function parsePlan(spec: string): string[] {
+  const parts = spec.split(',').map((s) => s.trim()).filter(Boolean).map((p) => {
+    const m = /^(\/[^:]+)(?::(\d+))?$/.exec(p);
+    if (!m) throw new Error(`invalid BUYER_PLAN entry "${p}"`);
+    return { path: m[1], n: Number(m[2] ?? 1) };
+  });
+  const out: string[] = [];
+  for (let i = 0; parts.some((p) => p.n > i); i++) for (const p of parts) if (p.n > i) out.push(p.path);
+  return out;
 }
 
 export function buyerOptionsFromEnv(env: NodeJS.ProcessEnv, store: RecordStore): BuyerOptions {
@@ -85,6 +117,10 @@ export function buyerOptionsFromEnv(env: NodeJS.ProcessEnv, store: RecordStore):
     paths: (env.BUYER_PATHS || '/jin/series,/jin/movers').split(',').map((s) => s.trim()).filter(Boolean),
     dailyCapJpyc: env.BUYER_DAILY_CAP_JPYC || '20',
     oncePerDay: envFlag(env.BUYER_ONCE_PER_DAY, true),
+    plan: env.BUYER_PLAN ? parsePlan(env.BUYER_PLAN) : undefined,
+    intervalMs: env.BUYER_INTERVAL_MS ? Number(env.BUYER_INTERVAL_MS) : undefined,
+    runUntilJst: env.RUN_UNTIL_JST || undefined,
+    maxFailuresPerDay: env.BUYER_MAX_FAILURES_PER_DAY ? Number(env.BUYER_MAX_FAILURES_PER_DAY) : undefined,
     expectedPayTo: env.BUYER_EXPECTED_PAY_TO || undefined,
     polygonRpcUrl: env.POLYGON_RPC_URL || undefined,
     store,
@@ -96,7 +132,7 @@ export async function runBuyer(o: BuyerOptions): Promise<BuyerRunResult> {
   const now = o.now ?? (() => new Date());
   const network = o.network ?? POLYGON_MAINNET;
   const gatewayUrl = o.gatewayUrl.replace(/\/+$/, '');
-  const paths = o.paths ?? ['/jin/series', '/jin/movers'];
+  const paths = o.plan ?? o.paths ?? ['/jin/series', '/jin/movers'];
   const capAtomic = jpycToAtomic(o.dailyCapJpyc ?? '20');
   const oncePerDay = o.oncePerDay ?? true;
   const expectedPayTo = o.expectedPayTo?.toLowerCase();
@@ -128,6 +164,39 @@ export async function runBuyer(o: BuyerOptions): Promise<BuyerRunResult> {
     await o.store.append(day, JSON.stringify(r));
     log(JSON.stringify(r));
   };
+  const stop = async (reason: string) => {
+    result.stopReason = reason;
+    await record({ ts: jstIso(now()), path: '-', spent_jpyc: '0', status: 'stopped', error: reason });
+    log(`[buyer] stopped without paying: ${reason}`);
+    result.spentAfterJpyc = atomicToJpyc(spentAtomic);
+    return result;
+  };
+  const isFailure = (r: BuyerRecord) => r.status === 'http_error' || r.status === 'error';
+  let failures = previous.filter(isFailure).length;
+  const maxFailures = o.maxFailuresPerDay ?? Infinity;
+
+  // 期間（RUN_UNTIL_JST）を過ぎていたら支払わない
+  if (o.runUntilJst) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(o.runUntilJst)) throw new Error(`invalid RUN_UNTIL_JST ${o.runUntilJst}`);
+    if (day > o.runUntilJst) return stop(`run period ended (RUN_UNTIL_JST=${o.runUntilJst}, today=${day})`);
+  }
+  if (failures > maxFailures) return stop(`failures today ${failures} > ${maxFailures}`);
+
+  // 残りの計画分の JPYC・上流 USDC が足りなければ支払わない
+  if (o.checkFunds) {
+    let needJpyc = 0n;
+    let needUsdc = 0n;
+    for (const p of paths) {
+      const c = o.costs?.[p];
+      if (!c) continue;
+      needJpyc += jpycToAtomic(c.priceJpyc);
+      needUsdc += usdToUsdcAtomic(c.upstreamCostUsd);
+    }
+    const capLeft = capAtomic - spentAtomic;
+    if (needJpyc > capLeft) needJpyc = capLeft > 0n ? capLeft : 0n;
+    const short = await o.checkFunds(needJpyc, needUsdc, account.address);
+    if (short) return stop(short);
+  }
 
   // この実行で署名しようとしている額（上限判定に使う）
   let pendingAtomic = 0n;
@@ -163,7 +232,7 @@ export async function runBuyer(o: BuyerOptions): Promise<BuyerRunResult> {
   });
   const fetchWithPayment = wrapFetchWithPayment(o.fetch ?? fetch, client);
 
-  for (const path of paths) {
+  for (const [i, path] of paths.entries()) {
     const lockKey = `${day}${path}`;
     if (oncePerDay) {
       const bought = previous.some((r) => r.path === path && r.status === 'ok');
@@ -205,12 +274,18 @@ export async function runBuyer(o: BuyerOptions): Promise<BuyerRunResult> {
       };
     }
     await record(rec);
+    if (isFailure(rec)) failures++;
     // 何も支払わずに失敗したときだけロックを外す（その日のうちに再実行できる）
     if (oncePerDay && rec.status !== 'ok' && rec.spent_jpyc === '0') await o.store.unlock(lockKey);
     if (rec.status === 'cap_exceeded') {
       log('[buyer] daily cap reached; stopping without paying');
       break;
     }
+    if (failures > maxFailures) {
+      await stop(`failures today ${failures} > ${maxFailures}`);
+      break;
+    }
+    if (o.intervalMs && i < paths.length - 1) await new Promise((r) => setTimeout(r, o.intervalMs));
   }
   result.spentAfterJpyc = atomicToJpyc(spentAtomic);
   log(`[buyer] done. spent today ${result.spentAfterJpyc} / ${result.capJpyc} JPYC`);

@@ -77,9 +77,10 @@ export function loadGatewayConfig(env: NodeJS.ProcessEnv = process.env): Gateway
     console.warn('[config] CDP facilitator without CDP_API_KEY_ID / CDP_API_KEY_SECRET: verify will fail until they are set');
   }
   if (cfg.logSink !== 'blob' && cfg.logSink !== 'file') throw new Error('LOG_SINK must be blob or file');
-  // ローカルファイルへの出力は開発時だけ（poc-card-credits と同じ規則）
-  if (cfg.logSink === 'file' && env.NODE_ENV !== 'development') {
-    throw new Error('LOG_SINK=file is for local development only (requires NODE_ENV=development)');
+  // ローカルファイルへの出力は開発時だけ（poc-card-credits と同じ規則）。
+  // 例外：GitHub Actions の定期実行（指示書3）は、決済ログを log/ に書いてリポジトリにコミットする
+  if (cfg.logSink === 'file' && env.NODE_ENV !== 'development' && env.GITHUB_ACTIONS !== 'true') {
+    throw new Error('LOG_SINK=file is for local development or the GitHub Actions daily run only');
   }
   if (cfg.logSink === 'blob' && !cfg.blobReadWriteToken) {
     throw new Error('missing BLOB_READ_WRITE_TOKEN (gateway logs go to Vercel Blob, same as poc-card-credits)');
