@@ -1,5 +1,5 @@
 # 定期実行（指示書3）：毎日 06:30 JST に、ジョブ内でゲートウェイを localhost に起動し、
-# 買い手が /jin/series 20 回 + /jin/movers 20 回（= 100 JPYC）を買う。決済ログと summary.json をコミットする。
+# 買い手が /jin/series 2 回 + /jin/movers 2 回（= 10 JPYC）を買う。決済ログと summary.json をコミットする。
 #
 # 鍵は GitHub Secrets に役割ごとに分けて置く（ゲートウェイの手順にだけ GATEWAY_ENV、買い手の手順にだけ BUYER_ENV を渡す）。
 #   GATEWAY_ENV: CDP_API_KEY_ID / CDP_API_KEY_SECRET / UPSTREAM_SOLANA_PRIVATE_KEY（dotenv 形式）
@@ -82,14 +82,14 @@ jobs:
           done
           echo "gateway did not start"; tail -n 30 "$RUNNER_TEMP/gateway.log"; exit 1
 
-      - name: Buy (100 JPYC / day)
+      - name: Buy (10 JPYC / day)
         if: steps.period.outputs.active == 'true'
         env:
           BUYER_ENV: ${{ secrets.BUYER_ENV }}
           GATEWAY_URL: http://localhost:${{ env.GATEWAY_PORT }}
-          BUYER_PLAN: /jin/series:20,/jin/movers:20
+          BUYER_PLAN: /jin/series:2,/jin/movers:2
           BUYER_INTERVAL_MS: '3000'
-          BUYER_DAILY_CAP_JPYC: '100'
+          BUYER_DAILY_CAP_JPYC: '10'
           BUYER_ONCE_PER_DAY: '0'
           BUYER_MAX_FAILURES_PER_DAY: '5'
           BUYER_EXPECTED_PAY_TO: ${{ env.JPYC_PAY_TO }}

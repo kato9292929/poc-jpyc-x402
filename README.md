@@ -33,7 +33,7 @@ JIN（jin.x402jp.com）を既存の x402（Solana / USDC）で購入    src/upst
 | B（自前ホスト） | 予備として実装のみ（`src/facilitator-server.ts`、`npm run facilitator:serve`） | x402 の参照実装（`@x402/evm`）を使用。CDP が使えなくなったときに `FACILITATOR_URL` を向け替える。relayer ウォレット `0x41ff0e098Cd675ACe5F1BdCf58042cDE9e802BBd`（Polygon、POL 0.5 入金済み・未使用） |
 | Phase 0（Amoy） | **実施しない** | 指示書2の決定。mainnet を少額で行った |
 | 実行場所 | ゲートウェイ・買い手ともに作業用コンテナ内（`localhost`） | 指示書2の決定。Vercel へのデプロイは行っていない |
-| 定期実行 | GitHub Actions の cron（毎日 06:30 JST、1 日 100 JPYC・30 日間） | 指示書3の決定。下の「定期実行」を参照 |
+| 定期実行 | GitHub Actions の cron（毎日 06:30 JST、1 日 10 JPYC・30 日間） | 指示書3の決定。下の「定期実行」を参照 |
 
 ### Phase 1 の結果（2026-10-18、Polygon mainnet、facilitator = CDP）
 
@@ -102,8 +102,8 @@ B は relayer のガスを守るため、JPYC・`FACILITATOR_ALLOWED_PAY_TO`・`
 
 | 項目 | 設定 |
 |---|---|
-| 1 日の購入 | `/jin/series` 20 回 + `/jin/movers` 20 回（交互、3 秒間隔）= 100 JPYC、上流原価 0.60 USDC |
-| 上限 | `BUYER_DAILY_CAP_JPYC=100`、1 日 1 回の制限（`BUYER_ONCE_PER_DAY`）は外す |
+| 1 日の購入 | `/jin/series` 2 回 + `/jin/movers` 2 回（交互、3 秒間隔）= 10 JPYC、上流原価 0.06 USDC（30 日で 300 JPYC / 1.80 USDC） |
+| 上限 | `BUYER_DAILY_CAP_JPYC=10`、1 日 1 回の制限（`BUYER_ONCE_PER_DAY`）は外す |
 | 期間 | 2026-10-26〜2026-11-24（30 日、`RUN_START_JST` / `RUN_UNTIL_JST`。リポジトリ変数で上書き可）。期間外のジョブは何も支払わずに終わる |
 | 失敗 | verify・settle の失敗、上流の失敗（`upstream_failed`）はログに残して次へ。同じ日の失敗が 5 件を超えたら、その日の残りは支払わない |
 | 残高 | 始める前に、その日の計画分の JPYC（買い手）と USDC（上流購入用）があるかを確かめ、足りなければ支払わない |
