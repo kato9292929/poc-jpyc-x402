@@ -104,7 +104,7 @@ B は relayer のガスを守るため、JPYC・`FACILITATOR_ALLOWED_PAY_TO`・`
 |---|---|
 | 1 日の購入 | `/jin/series` 20 回 + `/jin/movers` 20 回（交互、3 秒間隔）= 100 JPYC、上流原価 0.60 USDC |
 | 上限 | `BUYER_DAILY_CAP_JPYC=100`、1 日 1 回の制限（`BUYER_ONCE_PER_DAY`）は外す |
-| 期間 | `RUN_START_JST`〜`RUN_UNTIL_JST`（30 日。リポジトリ変数で上書き可）。期間外のジョブは何も支払わずに終わる |
+| 期間 | 2026-10-26〜2026-11-24（30 日、`RUN_START_JST` / `RUN_UNTIL_JST`。リポジトリ変数で上書き可）。期間外のジョブは何も支払わずに終わる |
 | 失敗 | verify・settle の失敗、上流の失敗（`upstream_failed`）はログに残して次へ。同じ日の失敗が 5 件を超えたら、その日の残りは支払わない |
 | 残高 | 始める前に、その日の計画分の JPYC（買い手）と USDC（上流購入用）があるかを確かめ、足りなければ支払わない |
 | 鍵 | GitHub Secrets：`GATEWAY_ENV`（CDP キー・上流購入用の鍵）はゲートウェイの手順だけ、`BUYER_ENV`（買い手の鍵）は買い手の手順だけに渡す |

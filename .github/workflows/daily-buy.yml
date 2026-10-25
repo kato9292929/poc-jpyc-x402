@@ -8,11 +8,9 @@
 name: daily-buy
 
 on:
-  workflow_dispatch:
-  push:
-    # 初回の手動実行用（ワークフローがまだ main に無いため workflow_dispatch を使えない）。PR の前に外す
-    branches: [claude/keen-dirac-x07kt4]
-    paths: [ops/run-request.txt]
+  schedule:
+    - cron: '30 21 * * *'   # 毎日 06:30 JST（21:30 UTC）。GitHub の混雑で数分〜数十分遅れることがある
+  workflow_dispatch:         # 手動実行（入金後に当日分をすぐ回したいとき）
 
 permissions:
   contents: write
@@ -22,8 +20,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  RUN_START_JST: ${{ vars.RUN_START_JST || '2026-10-25' }}
-  RUN_UNTIL_JST: ${{ vars.RUN_UNTIL_JST || '2026-11-23' }}
+  RUN_START_JST: ${{ vars.RUN_START_JST || '2026-10-26' }}
+  RUN_UNTIL_JST: ${{ vars.RUN_UNTIL_JST || '2026-11-24' }}
   JPYC_NETWORK: eip155:137
   POLYGON_RPC_URL: https://polygon-bor-rpc.publicnode.com
   SOLANA_RPC_URL: https://api.mainnet-beta.solana.com
