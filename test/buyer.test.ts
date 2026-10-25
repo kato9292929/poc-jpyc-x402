@@ -98,3 +98,63 @@ test('BUYER_ONCE_PER_DAY は 1 / true / 0 / false', () => {
   assert.equal(envFlag(undefined, true), true);
   assert.throws(() => envFlag('maybe', true));
 });
+
+test('BUYER_PLAN は交互に並べる（series 20 + movers 20 = 40 件）', async () => {
+  const { parsePlan } = await import('../src/buyer.ts');
+  const p = parsePlan('/jin/series:20,/jin/movers:20');
+  assert.equal(p.length, 40);
+  assert.deepEqual(p.slice(0, 4), ['/jin/series', '/jin/movers', '/jin/series', '/jin/movers']);
+  assert.deepEqual(parsePlan('/jin/series:2,/jin/movers'), ['/jin/series', '/jin/movers', '/jin/series']);
+  assert.throws(() => parsePlan('jin/series:x'));
+});
+
+test('定期実行：計画どおり 100 JPYC 分を買い、上限ちょうどで止まらない', async () => {
+  const { parsePlan } = await import('../src/buyer.ts');
+  const store = new MemRecords();
+  const g = gateway();
+  const r = await runBuyer(base(store, g.f, { plan: parsePlan('/jin/series:20,/jin/movers:20'), dailyCapJpyc: '100', oncePerDay: false }));
+  assert.equal(r.records.filter((x) => x.status === 'ok').length, 40);
+  assert.equal(r.spentAfterJpyc, '100');
+  assert.equal(r.stopReason, undefined);
+  // 同じ日にもう一度走らせても上限で支払わない
+  const r2 = await runBuyer(base(store, g.f, { plan: ['/jin/series'], dailyCapJpyc: '100', oncePerDay: false }));
+  assert.equal(r2.records[0].status, 'cap_exceeded');
+  assert.equal(g.settles(), 40);
+});
+
+test('同じ日の失敗が 5 件を超えたら、その日の残りは支払わない', async () => {
+  const store = new MemRecords();
+  const g = gateway(false); // settle が毎回失敗
+  const r = await runBuyer(base(store, g.f, { plan: Array(10).fill('/jin/series'), oncePerDay: false, maxFailuresPerDay: 5 }));
+  assert.equal(r.records.filter((x) => x.status === 'http_error').length, 6);
+  assert.match(r.stopReason!, /failures today 6 > 5/);
+  assert.equal(g.settles(), 6);
+  // 翌回（同じ日）は始める前に止まる
+  const r2 = await runBuyer(base(store, g.f, { plan: ['/jin/series'], oncePerDay: false, maxFailuresPerDay: 5 }));
+  assert.match(r2.stopReason!, /failures today/);
+  assert.equal(g.settles(), 6);
+});
+
+test('RUN_UNTIL_JST を過ぎたら支払わない', async () => {
+  const store = new MemRecords();
+  const g = gateway();
+  const r = await runBuyer(base(store, g.f, { plan: ['/jin/series'], oncePerDay: false, runUntilJst: '2026-11-22', now: () => new Date('2026-11-22T15:30:00Z') }));
+  assert.match(r.stopReason!, /run period ended/);
+  assert.equal(g.settles(), 0);
+  const ok = await runBuyer(base(new MemRecords(), g.f, { plan: ['/jin/series'], oncePerDay: false, runUntilJst: '2026-11-22', now: () => new Date('2026-11-22T14:59:00Z') }));
+  assert.equal(ok.records[0].status, 'ok');
+});
+
+test('残高が計画分に足りなければ支払わない（必要額は計画から計算）', async () => {
+  const { parsePlan } = await import('../src/buyer.ts');
+  const g = gateway();
+  const seen: [bigint, bigint][] = [];
+  const costs = { '/jin/series': { priceJpyc: '2', upstreamCostUsd: '0.01' }, '/jin/movers': { priceJpyc: '3', upstreamCostUsd: '0.02' } };
+  const r = await runBuyer(base(new MemRecords(), g.f, {
+    plan: parsePlan('/jin/series:20,/jin/movers:20'), dailyCapJpyc: '100', oncePerDay: false, costs,
+    checkFunds: async (j: bigint, u: bigint) => (seen.push([j, u]), 'insufficient upstream USDC: 0.5 < 0.6'),
+  }));
+  assert.deepEqual(seen, [[100n * 10n ** 18n, 600_000n]]);
+  assert.match(r.stopReason!, /insufficient upstream USDC/);
+  assert.equal(g.settles(), 0);
+});

@@ -14,6 +14,7 @@ test('LOG_SINK=file は NODE_ENV=development のときだけ', () => {
   assert.throws(() => loadGatewayConfig({ ...base, LOG_SINK: 'file' }), /development/);
   assert.equal(loadGatewayConfig({ ...base, LOG_SINK: 'file', NODE_ENV: 'development' }).logSink, 'file');
   assert.equal(loadGatewayConfig({ ...base }).logSink, 'blob');
+  assert.equal(loadGatewayConfig({ ...base, LOG_SINK: 'file', GITHUB_ACTIONS: 'true' }).logSink, 'file');
 });
 
 test('買い手の鍵はゲートウェイに置かない・poc-card-credits の鍵と同じにしない', () => {
