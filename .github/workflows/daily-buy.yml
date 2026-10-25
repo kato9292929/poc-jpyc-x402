@@ -108,10 +108,9 @@ jobs:
         if: always() && steps.period.outputs.active == 'true'
         run: |
           if [ -f "$RUNNER_TEMP/gateway.pid" ]; then
-            pid=$(cat "$RUNNER_TEMP/gateway.pid")
-            pkill -TERM -P "$pid" 2>/dev/null || true
-            kill -TERM "$pid" 2>/dev/null || true
-            sleep 3
+            # npx → tsx → node と子が続くので、コマンドラインで探して止める（SIGTERM でログを書き切ってから終わる）
+            pkill -TERM -f "src/gateway/server.ts" 2>/dev/null || true
+            for i in $(seq 1 10); do pgrep -f "src/gateway/server.ts" > /dev/null || break; sleep 1; done
           fi
           rm -f "$RUNNER_TEMP/gateway.env"
           echo "--- gateway log (tail) ---"; tail -n 40 "$RUNNER_TEMP/gateway.log" 2>/dev/null || true
