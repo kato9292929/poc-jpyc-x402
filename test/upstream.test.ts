@@ -80,3 +80,34 @@ test('一致すれば Solana の支払いを付けて再送し、上流の tx �
   assert.equal(new TextDecoder().decode(r.body), '{"series":[]}');
   assert.ok(seen[1].get('payment-signature'));
 });
+
+test('支払い後に上流が 402 を返し直したら、上流の理由をエラーに残す', async () => {
+  const fetchImpl = (async (_u: string, init?: RequestInit) => {
+    const h = new Headers(init?.headers);
+    if (!h.get('payment-signature')) {
+      return new Response('{}', { status: 402, headers: { 'payment-required': encodePaymentRequiredHeader(pr('20000') as any) } });
+    }
+    const again = { ...pr('20000'), error: 'invalid_exact_svm_payload_transaction_simulation_failed' };
+    return new Response('{}', { status: 402, headers: { 'payment-required': encodePaymentRequiredHeader(again as any) } });
+  }) as typeof fetch;
+  const b = await JinUpstreamBuyer.create({ svmPrivateKey: key(), fetch: fetchImpl });
+  (b as any).client.createPaymentPayload = async (p: any) => ({ x402Version: 2, accepted: p.accepts[0], payload: { transaction: 'dGVzdA==' } });
+  const r = await b.buy('https://jin.x402jp.com/api/jin/movers', 20_000n);
+  assert.equal(r.status, 402);
+  assert.equal(r.paid, true);
+  assert.equal(r.error, 'upstream 402 after payment (invalid_exact_svm_payload_transaction_simulation_failed)');
+});
+
+test('PAYMENT-REQUIRED が無ければ本文の先頭を理由として残す', async () => {
+  const fetchImpl = (async (_u: string, init?: RequestInit) => {
+    const h = new Headers(init?.headers);
+    if (!h.get('payment-signature')) {
+      return new Response('{}', { status: 402, headers: { 'payment-required': encodePaymentRequiredHeader(pr('20000') as any) } });
+    }
+    return new Response('{"error":"facilitator settle failed"}', { status: 402 });
+  }) as typeof fetch;
+  const b = await JinUpstreamBuyer.create({ svmPrivateKey: key(), fetch: fetchImpl });
+  (b as any).client.createPaymentPayload = async (p: any) => ({ x402Version: 2, accepted: p.accepts[0], payload: { transaction: 'dGVzdA==' } });
+  const r = await b.buy('https://jin.x402jp.com/api/jin/movers', 20_000n);
+  assert.equal(r.error, 'upstream 402 after payment ({"error":"facilitator settle failed"})');
+});
