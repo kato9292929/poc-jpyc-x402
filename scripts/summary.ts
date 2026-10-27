@@ -3,6 +3,7 @@
  * - 累計件数、status 別件数、成功率（ok / 全決済）
  * - settle 時間（settle_ms）の中央値と最大（settle まで進んだもの = ok / upstream_failed）
  * - 累計 JPYC（受領 = ok + upstream_failed）、累計上流 USDC（ok の upstream_cost_usd）
+ * - 失敗の型別件数（src/failures.ts：JPYC 未受領／上流が未払いで失敗／上流が支払い後に失敗／上流は支払い済み）
  * - CDP が負担したガス代の合計（settle tx の gasUsed × effectiveGasPrice、POL）。日ごとに保存し、件数が変わった日だけ読み直す
  * 使い方: RUN_START_JST=2026-10-25 [RUN_UNTIL_JST=...] npx tsx scripts/summary.ts
  */
@@ -12,6 +13,7 @@ import { join } from 'node:path';
 import { createPublicClient, formatEther, http } from 'viem';
 import { polygon } from 'viem/chains';
 import { parseLines } from '../src/logstore/types.ts';
+import { countFailures, type FailureType } from '../src/failures.ts';
 
 const LOG_DIR = process.env.LOG_DIR || 'log';
 const OUT = process.env.SUMMARY_PATH || 'summary.json';
@@ -19,7 +21,7 @@ const since = process.env.RUN_START_JST || '0000-00-00';
 const until = process.env.RUN_UNTIL_JST || '9999-99-99';
 const pc = createPublicClient({ chain: polygon, transport: http(process.env.POLYGON_RPC_URL || 'https://polygon-bor-rpc.publicnode.com') });
 
-type Day = { payments: number; ok: number; by_status: Record<string, number>; jpyc: number; upstream_usdc: number; gas_wei: string; gas_txs: number };
+type Day = { payments: number; ok: number; by_status: Record<string, number>; failures: Record<FailureType, number>; jpyc: number; upstream_usdc: number; gas_wei: string; gas_txs: number };
 const prev = existsSync(OUT) ? JSON.parse(readFileSync(OUT, 'utf8')) : {};
 const prevDays: Record<string, Day> = prev.days ?? {};
 
@@ -33,7 +35,7 @@ for (const f of files) {
   const day = f.slice(0, 10);
   if (day < since || day > until) continue;
   const rows = parseLines(readFileSync(join(LOG_DIR, f), 'utf8'));
-  const d: Day = { payments: rows.length, ok: 0, by_status: {}, jpyc: 0, upstream_usdc: 0, gas_wei: '0', gas_txs: 0 };
+  const d: Day = { payments: rows.length, ok: 0, by_status: {}, failures: countFailures(rows), jpyc: 0, upstream_usdc: 0, gas_wei: '0', gas_txs: 0 };
   const txs: string[] = [];
   for (const r of rows) {
     d.by_status[r.status] = (d.by_status[r.status] ?? 0) + 1;
@@ -89,6 +91,10 @@ const summary = {
   success_rate: payments ? Math.round((sum('ok') / payments) * 10000) / 10000 : null,
   by_status: byStatus,
   by_endpoint: byEndpoint,
+  failures: Object.values(days).reduce((acc, d) => {
+    for (const [k, v] of Object.entries(d.failures)) acc[k] = (acc[k] ?? 0) + v;
+    return acc;
+  }, {} as Record<string, number>),
   settle_ms: { median: median(settleMs), max: settleMs.length ? Math.max(...settleMs) : null, samples: settleMs.length },
   jpyc_received: sum('jpyc'),
   upstream_usdc_spent: Math.round(sum('upstream_usdc') * 1e6) / 1e6,

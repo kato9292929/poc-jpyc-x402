@@ -113,6 +113,17 @@ B は relayer のガスを守るため、JPYC・`FACILITATOR_ALLOWED_PAY_TO`・`
 `summary.json`：累計件数・status 別件数・成功率、settle 時間の中央値と最大、累計 JPYC（受領）、累計上流 USDC、
 CDP が負担したガス代の合計（settle tx の receipt から計算）。ローカルで作り直すときは `RUN_START_JST=... npx tsx scripts/summary.ts`。
 
+失敗は、お金がどこまで動いたかで 4 つの型に分けて数える（`src/failures.ts`、`summary.json` の `failures`）：
+
+| 型 | お金の動き |
+|---|---|
+| JPYC の verify / settle が失敗 | JPYC 受領なし・上流 USDC 動かない |
+| 上流が未払いの段階で失敗 | JPYC 受領済み・上流 USDC 動かない |
+| 上流が支払い受領後に失敗（402 など） | JPYC 受領済み・上流 USDC 動かない（上流の tx なし） |
+| 上流は支払い済み、データを渡せず | JPYC 受領済み・上流 USDC 支払い済み（回収できない原価） |
+
+週次レポート（Markdown）：`npm run report:weekly -- --from 2026-10-25 --to 2026-10-31 [--out reports/weekly-2026-10-25.md]`
+
 ## 決済ログ
 
 poc-card-credits と同じ規則：1 決済 1 行の JSONL、日付の区切りは JST（`log/YYYY-MM-DD.jsonl`）、
