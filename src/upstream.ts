@@ -110,10 +110,26 @@ export class JinUpstreamBuyer implements UpstreamBuyer {
         settled = undefined;
       }
       const ok = second.ok && !!settled?.success;
+      // 支払いを送ったのに上流が失敗したときは、上流が示した理由を残す（x402 v2 は 402 の PAYMENT-REQUIRED の error、
+      // それ以外は本文の先頭）。10/26 の JIN の「支払い後の 402」で理由が分からなかったため（poc-card-credits c404cd4 と同じ）
+      let upstreamReason: string | undefined;
+      if (!second.ok) {
+        try {
+          const prh = second.headers.get('payment-required');
+          if (prh) upstreamReason = JSON.parse(Buffer.from(prh, 'base64').toString('utf8'))?.error;
+        } catch {
+          upstreamReason = undefined;
+        }
+        if (!upstreamReason) {
+          upstreamReason = (await second.clone().text().catch(() => '')).replace(/\s+/g, ' ').slice(0, 200) || undefined;
+        }
+      }
       return read(second, {
         paid: true,
         tx: settled?.transaction || undefined,
-        error: ok ? undefined : `upstream ${second.status} after payment${settled?.errorReason ? `: ${settled.errorReason}` : ''}`,
+        error: ok
+          ? undefined
+          : `upstream ${second.status} after payment${settled?.errorReason ? `: ${settled.errorReason}` : ''}${upstreamReason ? ` (${upstreamReason})` : ''}`,
       });
     } catch (e) {
       return fail(0, `upstream payment failed: ${(e as Error).message}`, sent);
