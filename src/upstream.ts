@@ -132,7 +132,8 @@ export class JinUpstreamBuyer implements UpstreamBuyer {
           : `upstream ${second.status} after payment${settled?.errorReason ? `: ${settled.errorReason}` : ''}${upstreamReason ? ` (${upstreamReason})` : ''}`,
       });
     } catch (e) {
-      return fail(0, `upstream payment failed: ${(e as Error).message}`, sent);
+      // 送る前に失敗したか（署名の作成など）、送った後に失敗したか（通信が途中で切れた等）を分けて残す
+      return fail(0, sent ? `upstream payment failed after sending: ${(e as Error).message}` : `upstream payment not sent: ${(e as Error).message}`, sent);
     }
   }
 }

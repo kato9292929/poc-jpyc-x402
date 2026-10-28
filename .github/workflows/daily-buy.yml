@@ -46,10 +46,10 @@ jobs:
             echo "active=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         if: steps.period.outputs.active == 'true'
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         if: steps.period.outputs.active == 'true'
         with:
           node-version: 22

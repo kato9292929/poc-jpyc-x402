@@ -19,7 +19,8 @@
     "test": "tsx --test test/*.test.ts",
     "verify:simulate": "tsx scripts/simulate-verify.ts",
     "facilitator:serve": "tsx scripts/facilitator-serve.ts",
-    "balances": "tsx scripts/balances.ts"
+    "balances": "tsx scripts/balances.ts",
+    "report:weekly": "tsx scripts/weekly-report.ts"
   },
   "dependencies": {
     "@coinbase/x402": "2.1.0",
