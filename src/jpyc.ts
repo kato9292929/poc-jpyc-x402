@@ -18,16 +18,39 @@ export const JPYC_EIP712 = { name: 'JPY Coin', version: '1' } as const;
 
 export const POLYGON_MAINNET = 'eip155:137' as const;
 export const POLYGON_AMOY = 'eip155:80002' as const;
-export type JpycNetwork = typeof POLYGON_MAINNET | typeof POLYGON_AMOY;
-export const JPYC_NETWORKS: readonly JpycNetwork[] = [POLYGON_MAINNET, POLYGON_AMOY];
+export const AVALANCHE = 'eip155:43114' as const;
+export const KAIA = 'eip155:8217' as const;
+export const ETHEREUM = 'eip155:1' as const;
+export type JpycNetwork = typeof POLYGON_MAINNET | typeof POLYGON_AMOY | typeof AVALANCHE | typeof KAIA | typeof ETHEREUM;
+/** JPYC が同じアドレスで発行されていて、domain（"JPY Coin" / "1"）の署名が通ることを確かめたチェーン（2026-10-29） */
+export const JPYC_NETWORKS: readonly JpycNetwork[] = [POLYGON_MAINNET, POLYGON_AMOY, AVALANCHE, KAIA, ETHEREUM];
+
+const CHAIN_IDS: Record<JpycNetwork, number> = {
+  [POLYGON_MAINNET]: 137,
+  [POLYGON_AMOY]: 80002,
+  [AVALANCHE]: 43114,
+  [KAIA]: 8217,
+  [ETHEREUM]: 1,
+};
+const EXPLORERS: Record<JpycNetwork, string> = {
+  [POLYGON_MAINNET]: 'https://polygonscan.com/tx/',
+  [POLYGON_AMOY]: 'https://amoy.polygonscan.com/tx/',
+  [AVALANCHE]: 'https://snowtrace.io/tx/',
+  [KAIA]: 'https://kaiascan.io/tx/',
+  [ETHEREUM]: 'https://etherscan.io/tx/',
+};
 
 export function chainIdOf(network: JpycNetwork): number {
-  return network === POLYGON_MAINNET ? 137 : 80002;
+  const id = CHAIN_IDS[network];
+  if (!id) throw new Error(`unknown JPYC network ${network}`);
+  return id;
 }
 
+/** tx のエクスプローラー URL（関数名は Polygon だけだった頃の名残。全チェーン対応） */
 export function polygonscanTxUrl(network: JpycNetwork, tx: string): string {
-  return network === POLYGON_MAINNET ? `https://polygonscan.com/tx/${tx}` : `https://amoy.polygonscan.com/tx/${tx}`;
+  return `${EXPLORERS[network] ?? EXPLORERS[POLYGON_MAINNET]}${tx}`;
 }
+export const explorerTxUrl = polygonscanTxUrl;
 
 const UNIT = 10n ** BigInt(JPYC_DECIMALS);
 

@@ -16,22 +16,23 @@ class MemRecords implements RecordStore {
   async unlock(k: string) { this.locks.delete(k); }
 }
 
-function gateway(settleOk = true) {
+function gateway(settleOk = true, upstreamFails = false) {
   let settles = 0;
+  const fac = {
+    verify: async (p: any) => ({ isValid: true, payer: p.payload.authorization.from }),
+    settle: async (_p: any, r: any) => (settles++, settleOk ? { success: true, transaction: '0x' + '1'.repeat(64), network: r.network } : { success: false, errorReason: 'x', transaction: '', network: r.network }),
+    getSupported: async () => ({ kinds: [], extensions: [], signers: {} }),
+  } as any;
   const handle = createHandler({
     routes: loadRoutes({}),
-    network: 'eip155:137',
+    networks: ['eip155:137'],
+    facilitators: { 'eip155:137': { client: fac, kind: 'cdp' } },
     payTo: '0x2222222222222222222222222222222222222222',
     publicBaseUrl: 'https://gw.example',
-    upstreamBaseUrl: 'https://jin.example',
-    facilitator: {
-      verify: async (p: any) => ({ isValid: true, payer: p.payload.authorization.from }),
-      settle: async (_p: any, r: any) => (settles++, settleOk ? { success: true, transaction: '0x' + '1'.repeat(64), network: r.network } : { success: false, errorReason: 'x', transaction: '', network: r.network }),
-      getSupported: async () => ({ kinds: [], extensions: [], signers: {} }),
-    } as any,
-    facilitatorKind: 'cdp',
-    upstream: { buy: async () => ({ status: 200, body: new TextEncoder().encode('{"d":1}'), paid: true, tx: 'sol' }) },
+    upstreamBaseUrls: { jin: 'https://jin.example', osd: 'https://osd.example' },
+    upstream: { buy: async () => (upstreamFails ? { status: 502, body: new Uint8Array(), paid: false, error: 'upstream 503' } : { status: 200, body: new TextEncoder().encode('{"d":1}'), paid: true, tx: 'sol' }) },
     log: new PaymentLogWriter(new MemoryLogStore(), () => undefined),
+    upstreamDailyCapMicro: 10_000_000n,
   });
   const f = (async (input: any, init?: any) => {
     const req = new Request(input, init);
@@ -124,15 +125,15 @@ test('定期実行：計画どおり 100 JPYC 分を買い、上限ちょうど�
 
 test('同じ日の失敗が 5 件を超えたら、その日の残りは支払わない', async () => {
   const store = new MemRecords();
-  const g = gateway(false); // settle が毎回失敗
+  const g = gateway(true, true); // 上流が毎回失敗（settle まで進まない）
   const r = await runBuyer(base(store, g.f, { plan: Array(10).fill('/jin/series'), oncePerDay: false, maxFailuresPerDay: 5 }));
   assert.equal(r.records.filter((x) => x.status === 'http_error').length, 6);
   assert.match(r.stopReason!, /failures today 6 > 5/);
-  assert.equal(g.settles(), 6);
+  assert.equal(g.settles(), 0);
   // 翌回（同じ日）は始める前に止まる
   const r2 = await runBuyer(base(store, g.f, { plan: ['/jin/series'], oncePerDay: false, maxFailuresPerDay: 5 }));
   assert.match(r2.stopReason!, /failures today/);
-  assert.equal(g.settles(), 6);
+  assert.equal(g.settles(), 0);
 });
 
 test('RUN_UNTIL_JST を過ぎたら支払わない', async () => {
@@ -157,4 +158,15 @@ test('残高が計画分に足りなければ支払わない（必要額は計�
   assert.deepEqual(seen, [[100n * 10n ** 18n, 600_000n]]);
   assert.match(r.stopReason!, /insufficient upstream USDC/);
   assert.equal(g.settles(), 0);
+});
+
+test('新しい順番：上流が失敗したら settle されず、買い手の支出にも計上しない（X-PAYMENT-LOG を記録）', async () => {
+  const store = new MemRecords();
+  const g = gateway(true, true);
+  const r = await runBuyer(base(store, g.f, { paths: ['/jin/series'], oncePerDay: false }));
+  assert.equal(r.records[0].status, 'http_error');
+  assert.equal(r.records[0].spent_jpyc, '0');
+  assert.equal(g.settles(), 0);
+  assert.equal((r.records[0].gateway_log as any).status, 'upstream_failed');
+  assert.equal((r.records[0].gateway_log as any).flow, 'settle_last');
 });

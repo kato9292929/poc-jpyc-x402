@@ -17,7 +17,7 @@ import { decodePaymentResponseHeader, wrapFetchWithPayment } from '@x402/fetch';
 import { ExactEvmScheme } from '@x402/evm/exact/client';
 import { createPublicClient, erc20Abi, http } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-import { polygon, polygonAmoy } from 'viem/chains';
+import { NETWORK_SPECS } from './networks.ts';
 import { JPYC_ADDRESS, JPYC_EIP712, JPYC_NETWORKS, POLYGON_MAINNET, atomicToJpyc, jpycToAtomic, polygonscanTxUrl, type JpycNetwork } from './jpyc.ts';
 import { jstDay, jstIso } from './log.ts';
 import { parseLines } from './logstore/types.ts';
@@ -33,6 +33,8 @@ export interface BuyerRecord {
   settle_tx?: string;
   polygonscan?: string;
   error?: string;
+  /** ゲートウェイが X-PAYMENT-LOG で返した決済ログの 1 行 */
+  gateway_log?: Record<string, unknown>;
 }
 
 /** 買い手の記録の置き場（JST の日付ごとの JSONL と、パスごとのロック） */
@@ -153,7 +155,7 @@ export async function runBuyer(o: BuyerOptions): Promise<BuyerRunResult> {
   log(`[buyer] ${account.address} day=${day} spent=${result.spentBeforeJpyc} / cap=${result.capJpyc} JPYC network=${network}`);
 
   if (o.polygonRpcUrl) {
-    const pc = createPublicClient({ chain: network === POLYGON_MAINNET ? polygon : polygonAmoy, transport: http(o.polygonRpcUrl) });
+    const pc = createPublicClient({ chain: NETWORK_SPECS[network].chain, transport: http(o.polygonRpcUrl) });
     const bal = await pc.readContract({ address: JPYC_ADDRESS, abi: erc20Abi, functionName: 'balanceOf', args: [account.address] });
     result.balanceJpyc = atomicToJpyc(bal);
     log(`[buyer] JPYC balance ${result.balanceJpyc}`);
@@ -251,7 +253,20 @@ export async function runBuyer(o: BuyerOptions): Promise<BuyerRunResult> {
       const body = await res.text();
       // 送金されていないことが確実な応答（402 = 事前検査・verify・settle で拒否、verify の通信エラー）は計上を戻す。
       // settle の通信エラー（結果不明）や上流失敗（JPYC は送金済み）は計上したまま
-      if (!settle?.success && (res.status === 402 || /"facilitator_verify_error"/.test(body))) spentAtomic = before;
+      // 送金されていないことが確実な応答は計上を戻す：402（事前検査・verify・settle で拒否）、
+      // ゲートウェイが charged:false / X-CHARGED: false を返したもの（上流の失敗・無料の応答。settle していない）
+      const notCharged = res.headers.get('x-charged') === 'false' || /"charged":false/.test(body) || /"facilitator_verify_error"/.test(body);
+      if (!settle?.success && (res.status === 402 || notCharged)) spentAtomic = before;
+      // ゲートウェイの決済ログ 1 行（X-PAYMENT-LOG）。定期実行はこれを log/ に残す
+      const xlog = res.headers.get('x-payment-log');
+      let gatewayLog: Record<string, unknown> | undefined;
+      if (xlog) {
+        try {
+          gatewayLog = JSON.parse(Buffer.from(xlog, 'base64').toString('utf8'));
+        } catch {
+          gatewayLog = undefined;
+        }
+      }
       rec = {
         ts: jstIso(now()),
         path,
@@ -261,6 +276,7 @@ export async function runBuyer(o: BuyerOptions): Promise<BuyerRunResult> {
         settle_tx: settle?.transaction || undefined,
         polygonscan: settle?.transaction ? polygonscanTxUrl(network, settle.transaction) : undefined,
         error: res.ok ? undefined : body.slice(0, 300),
+        gateway_log: gatewayLog,
       };
       if (res.ok) result.bodies[path] = body.slice(0, 300);
     } catch (e) {

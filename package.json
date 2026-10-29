@@ -20,7 +20,8 @@
     "verify:simulate": "tsx scripts/simulate-verify.ts",
     "facilitator:serve": "tsx scripts/facilitator-serve.ts",
     "balances": "tsx scripts/balances.ts",
-    "report:weekly": "tsx scripts/weekly-report.ts"
+    "report:weekly": "tsx scripts/weekly-report.ts",
+    "vercel:stage": "node scripts/vercel-stage.mjs"
   },
   "dependencies": {
     "@coinbase/x402": "2.1.0",
@@ -29,6 +30,7 @@
     "@vercel/blob": "2.8.1",
     "@x402/core": "2.28.0",
     "@x402/evm": "2.28.0",
+    "@x402/extensions": "^2.28.0",
     "@x402/fetch": "2.28.0",
     "@x402/svm": "2.28.0",
     "dotenv": "^17.2.3",
@@ -38,6 +40,7 @@
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/node": "^22.0.0",
+    "esbuild": "^0.28.2",
     "tsx": "^4.20.0",
     "typescript": "^5.9.3"
   }

@@ -9,7 +9,8 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { formatEther } from 'viem';
-import { FAILURE_TYPES, classifyFailure } from '../src/failures.ts';
+import { FAILURE_TYPES, classifyFailure, jpycReceived } from '../src/failures.ts';
+import { explorerTxUrl, type JpycNetwork } from '../src/jpyc.ts';
 import { jstDay } from '../src/log.ts';
 import { parseLines } from '../src/logstore/types.ts';
 
@@ -35,8 +36,8 @@ for (const f of files) {
 }
 const all = days.flatMap((d) => d.rows);
 const ok = all.filter((r) => r.status === 'ok');
-const settled = all.filter((r) => r.status === 'ok' || r.status === 'upstream_failed');
-const settleMs = settled.map((r) => Number(r.settle_ms)).sort((a, b) => a - b);
+const settled = all.filter((r) => jpycReceived(r as any));
+const settleMs = all.map((r) => Number(r.settle_ms)).filter((n) => n > 0).sort((a, b) => a - b);
 const median = settleMs.length
   ? settleMs.length % 2
     ? settleMs[(settleMs.length - 1) / 2]
@@ -61,11 +62,11 @@ const lines: string[] = [];
 lines.push(`# JPYC × x402 週次レポート（${from}〜${to}、JST）`, '');
 lines.push('| 項目 | 値 |', '|---|---|');
 lines.push(`| 実行日数 | ${days.length} 日 |`);
-lines.push(`| 件数 | ${all.length} 件（成功 ${ok.length}・失敗 ${all.length - ok.length}） |`);
+lines.push(`| 件数 | ${all.length} 件（成功 ${ok.length}・無料 ${all.filter((r) => r.status === 'free').length}・失敗 ${all.filter((r) => r.status !== 'ok' && r.status !== 'free').length}） |`);
 lines.push(`| 成功率 | ${pct(ok.length, all.length)} |`);
 lines.push(`| settle 時間 | 中央値 ${sec(median)}、最大 ${sec(settleMs.length ? settleMs[settleMs.length - 1] : null)} |`);
 lines.push(`| 受領 JPYC | ${sum(settled, 'price_jpyc')} JPYC |`);
-lines.push(`| 上流 USDC | ${usd(sum(ok, 'upstream_cost_usd'))} USDC |`);
+lines.push(`| 上流 USDC | ${usd(sum(all, 'upstream_cost_usd'))} USDC |`);
 lines.push(`| CDP 負担ガス | ${gasDays ? `${Number(formatEther(gasWei)).toFixed(3)} POL` : '-'}${gasDays && gasDays < days.length ? `（${gasDays} 日分）` : ''} |`);
 lines.push('');
 
@@ -81,12 +82,12 @@ lines.push('## 日別', '');
 lines.push('| 日付 | 件数 | 成功 | 失敗 | 受領 JPYC | 上流 USDC |', '|---|---|---|---|---|---|');
 for (const d of days) {
   const dok = d.rows.filter((r) => r.status === 'ok');
-  const dset = d.rows.filter((r) => r.status === 'ok' || r.status === 'upstream_failed');
-  lines.push(`| ${d.day} | ${d.rows.length} | ${dok.length} | ${d.rows.length - dok.length} | ${sum(dset, 'price_jpyc')} | ${usd(sum(dok, 'upstream_cost_usd'))} |`);
+  const dset = d.rows.filter((r) => jpycReceived(r as any));
+  lines.push(`| ${d.day} | ${d.rows.length} | ${dok.length} | ${d.rows.length - dok.length} | ${sum(dset, 'price_jpyc')} | ${usd(sum(d.rows, 'upstream_cost_usd'))} |`);
 }
 lines.push('');
 
-const failed = all.filter((r) => r.status !== 'ok');
+const failed = all.filter((r) => r.status !== 'ok' && r.status !== 'free');
 lines.push('## 失敗の明細', '');
 if (!failed.length) {
   lines.push('この期間の失敗はありません。');
@@ -94,7 +95,7 @@ if (!failed.length) {
   lines.push('| 時刻（JST） | エンドポイント | 型 | 理由 | settle tx |', '|---|---|---|---|---|');
   for (const r of failed) {
     const t = FAILURE_TYPES.find((x) => x.type === classifyFailure(r as any))?.label ?? r.status;
-    const tx = /^0x[0-9a-fA-F]{64}$/.test(r.settle_tx) ? `[${r.settle_tx.slice(0, 10)}…](https://polygonscan.com/tx/${r.settle_tx})` : '-';
+    const tx = /^0x[0-9a-fA-F]{64}$/.test(r.settle_tx) ? `[${r.settle_tx.slice(0, 10)}…](${explorerTxUrl((r.network || 'eip155:137') as JpycNetwork, r.settle_tx)})` : '-';
     lines.push(`| ${String(r.ts).slice(0, 19).replace('T', ' ')} | ${r.endpoint} | ${t} | ${String(r.error ?? '').replace(/\|/g, '/').slice(0, 120)} | ${tx} |`);
   }
 }

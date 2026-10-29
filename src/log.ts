@@ -14,7 +14,14 @@ export function jstIso(d = new Date()): string {
   return new Date(d.getTime() + JST_OFFSET_MS).toISOString().replace('Z', '+09:00');
 }
 
-export type PaymentStatus = 'ok' | 'verify_failed' | 'settle_failed' | 'upstream_failed';
+/**
+ * ok              上流を仕入れ、JPYC を settle し、データを返した
+ * free            上流が請求しなかった（OSD の未調査銘柄など）。JPYC も settle せずに無料で返した
+ * verify_failed   事前検査か verify で落ちた（JPYC も上流も動かない）
+ * upstream_failed 上流の仕入れに失敗した。flow=settle_last では JPYC を settle していない
+ * settle_failed   flow=settle_last：上流は仕入れ済みで、JPYC の settle が失敗した（上流原価の損失）
+ */
+export type PaymentStatus = 'ok' | 'free' | 'verify_failed' | 'settle_failed' | 'upstream_failed';
 export type FacilitatorKind = 'cdp' | 'self';
 
 export interface PaymentLogEntry {
@@ -38,13 +45,18 @@ export interface PaymentLogEntry {
   status: PaymentStatus;
   /** 失敗理由（任意） */
   error?: string;
+  /**
+   * 処理の順番。'settle_last' = verify → 上流を仕入れ → settle（指示書4、2026-10-30〜）。
+   * 無い行は旧方式（settle → 上流）で、upstream_failed でも JPYC は受領済み
+   */
+  flow?: 'settle_last';
 }
 
 const REQUIRED: (keyof PaymentLogEntry)[] = [
   'ts', 'endpoint', 'price_jpyc', 'payer', 'pay_to', 'network', 'facilitator',
   'settle_tx', 'settle_ms', 'upstream_cost_usd', 'upstream_tx', 'status',
 ];
-const STATUSES: PaymentStatus[] = ['ok', 'verify_failed', 'settle_failed', 'upstream_failed'];
+const STATUSES: PaymentStatus[] = ['ok', 'free', 'verify_failed', 'settle_failed', 'upstream_failed'];
 
 /** 必須項目がそろっているかを確かめて1行の JSON にする（キーの順は指示書の表の順）。欠けていれば例外。 */
 export function toLogLine(e: PaymentLogEntry): string {
@@ -60,6 +72,7 @@ export function toLogLine(e: PaymentLogEntry): string {
   const ordered: Record<string, unknown> = {};
   for (const k of REQUIRED) ordered[k] = e[k];
   if (e.error) ordered.error = e.error.replace(/\s+/g, ' ').slice(0, 500);
+  if (e.flow) ordered.flow = e.flow;
   return JSON.stringify(ordered);
 }
 

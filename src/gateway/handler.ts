@@ -1,12 +1,13 @@
 import { decodePaymentSignatureHeader, encodePaymentRequiredHeader, encodePaymentResponseHeader, type FacilitatorClient } from '@x402/core/http';
-import type { PaymentPayload, SettleResponse } from '@x402/core/types';
-import { jstIso, type FacilitatorKind, type PaymentLogEntry, type PaymentStatus } from '../log.ts';
-import type { PaymentLogWriter } from '../logstore/writer.ts';
-import { NonceCache } from '../nonce.ts';
-import { buildPaymentRequired, buildRequirements, precheckPayment } from '../payment.ts';
-import { usdToUsdcAtomic, type Route } from '../routes.ts';
-import type { UpstreamBuyer } from '../upstream.ts';
+import type { PaymentPayload, PaymentRequirements, SettleResponse } from '@x402/core/types';
+import { bazaarExtension } from '../discovery.ts';
 import type { JpycNetwork } from '../jpyc.ts';
+import { jstDay, jstIso, toLogLine, type FacilitatorKind, type PaymentLogEntry, type PaymentStatus } from '../log.ts';
+import type { PaymentLogWriter } from '../logstore/writer.ts';
+import { buildPaymentRequired, buildRequirements, precheckPayment } from '../payment.ts';
+import { findRoute, usdToUsdcAtomic, type Route } from '../routes.ts';
+import { MemorySharedStore, type SharedStore } from '../stores.ts';
+import type { UpstreamBuyer } from '../upstream.ts';
 
 export interface GatewayRequest {
   method: string;
@@ -22,17 +23,26 @@ export interface GatewayResponse {
   body: Uint8Array | string;
 }
 
+export interface NetworkFacilitator {
+  client: FacilitatorClient;
+  kind: FacilitatorKind;
+}
+
 export interface HandlerDeps {
   routes: Route[];
-  network: JpycNetwork;
+  /** 受け付けるチェーン（402 の accepts にこの順で並べる） */
+  networks: JpycNetwork[];
+  facilitators: Partial<Record<JpycNetwork, NetworkFacilitator>>;
   payTo: string;
   publicBaseUrl: string;
-  upstreamBaseUrl: string;
-  facilitator: FacilitatorClient;
-  facilitatorKind: FacilitatorKind;
+  upstreamBaseUrls: Record<Route['upstream'], string>;
   upstream: UpstreamBuyer;
   log: PaymentLogWriter;
-  nonces?: NonceCache;
+  store?: SharedStore;
+  /** 上流への支払いの日次上限（USDC atomic、JST の日ごと）。既定 2 USDC */
+  upstreamDailyCapMicro?: bigint;
+  /** settle に失敗した payer を受け付けない時間。既定 24 時間 */
+  blockMs?: number;
   now?: () => Date;
 }
 
@@ -43,20 +53,31 @@ const json = (status: number, obj: unknown, headers: Record<string, string> = {}
 });
 
 /**
- * 1 リクエストの処理（指示書 §1 の構成図）。
- * 402 → 再送（PAYMENT-SIGNATURE）→ ゲートウェイ側の事前検査 → facilitator /verify → /settle → 上流（JIN）を x402 で購入 → 返す。
- * 支払いを伴ったリクエストは、結果によらず必ず決済ログを 1 行書く。
+ * 1 リクエストの処理（指示書4 §1：払ったのに届かない取引をなくす順番）。
+ *
+ *   402 → 再送（PAYMENT-SIGNATURE）→ 事前検査（金額・期限・nonce・受付停止中の payer）
+ *   → 1. verify（まだ settle しない）
+ *   → 2. 上流（JIN / OSD）を x402 で仕入れる（日次上限の範囲で）
+ *   → 3. 仕入れに成功したら JPYC を settle
+ *   → 4. settle に成功したらデータを返す
+ *
+ * 仕入れに失敗したら settle しない（買い手の署名は使われずに期限切れになり、買い手は払わない）。
+ * 仕入れ後に settle が失敗したら、データは返さず上流原価の損失として記録し、その payer を 24 時間受け付けない。
+ * 支払いを伴ったリクエストは、結果によらず決済ログを 1 行書き、同じ内容を X-PAYMENT-LOG ヘッダで買い手にも返す。
  */
 export function createHandler(deps: HandlerDeps) {
-  const nonces = deps.nonces ?? new NonceCache();
+  const store = deps.store ?? new MemorySharedStore();
   const now = deps.now ?? (() => new Date());
+  const capMicro = deps.upstreamDailyCapMicro ?? 2_000_000n;
+  const blockMs = deps.blockMs ?? 24 * 3_600_000;
 
   return async function handle(req: GatewayRequest): Promise<GatewayResponse> {
-    const route = deps.routes.find((r) => r.path === req.path);
-    if (!route) return json(404, { error: 'not_found', routes: deps.routes.map((r) => r.path) });
+    const found = findRoute(deps.routes, req.path);
+    if (!found) return json(404, { error: 'not_found', routes: deps.routes.map((r) => r.path) });
+    const { route, upstreamPath, params } = found;
     if (req.method !== 'GET') return json(405, { error: 'method_not_allowed' }, { allow: 'GET' });
 
-    const upstreamUrl = deps.upstreamBaseUrl + route.upstreamPath + req.search;
+    const upstreamUrl = deps.upstreamBaseUrls[route.upstream] + upstreamPath + req.search;
     const upstreamCostAtomic = usdToUsdcAtomic(route.upstreamCostUsd);
 
     // 無料のエンドポイント：402 を返さず上流をそのまま返す（決済ではないのでログも書かない）
@@ -66,11 +87,11 @@ export function createHandler(deps: HandlerDeps) {
       return { status: up.status, headers: { 'content-type': up.contentType ?? 'application/json' }, body: up.body };
     }
 
-    const requirements = buildRequirements({ network: deps.network, payTo: deps.payTo, priceJpyc: route.priceJpyc });
-    const resourceUrl = deps.publicBaseUrl + route.path;
-    const paymentRequired = (error?: string) => {
-      const pr = buildPaymentRequired({ url: resourceUrl, description: route.description, requirements, error });
-      return json(402, pr, { 'payment-required': encodePaymentRequiredHeader(pr) });
+    const requirements = deps.networks.map((network) => buildRequirements({ network, payTo: deps.payTo, priceJpyc: route.priceJpyc }));
+    const resourceUrl = deps.publicBaseUrl + req.path;
+    const paymentRequired = (error?: string, extra: Record<string, string> = {}) => {
+      const pr = buildPaymentRequired({ url: resourceUrl, description: route.description, requirements, error, extensions: bazaarExtension(route, params) });
+      return json(402, pr, { 'payment-required': encodePaymentRequiredHeader(pr), ...extra });
     };
 
     const sig = req.header('payment-signature');
@@ -83,101 +104,145 @@ export function createHandler(deps: HandlerDeps) {
       return paymentRequired('invalid_payment_signature_header');
     }
 
-    const base = {
-      endpoint: route.path,
-      price_jpyc: Number(route.priceJpyc),
-      pay_to: deps.payTo,
-      network: deps.network,
-      facilitator: deps.facilitatorKind,
-      upstream_cost_usd: Number(route.upstreamCostUsd),
-    };
-    const write = (fields: { status: PaymentStatus; payer: string; settle_tx?: string; settle_ms?: number; upstream_tx?: string; error?: string }) => {
+    const chosen: PaymentRequirements | undefined = requirements.find((r) => r.network === payload?.accepted?.network);
+    const network = (chosen?.network ?? payload?.accepted?.network ?? 'unknown') as JpycNetwork;
+    const fac = chosen ? deps.facilitators[network] : undefined;
+    const t0 = Date.now();
+    let upstreamMs = 0;
+
+    const write = (fields: { status: PaymentStatus; payer: string; settle_tx?: string; upstream_tx?: string; upstream_paid?: boolean; error?: string; timed?: boolean }): Record<string, string> => {
       const entry: PaymentLogEntry = {
         ts: jstIso(now()),
-        ...base,
+        endpoint: route.path,
+        price_jpyc: Number(route.priceJpyc),
         payer: fields.payer,
+        pay_to: deps.payTo,
+        network,
+        facilitator: fac?.kind ?? 'cdp',
         settle_tx: fields.settle_tx ?? 'none',
-        settle_ms: fields.settle_ms ?? 0,
+        settle_ms: fields.timed ? Date.now() - t0 : 0,
+        // 上流に払った（払った可能性がある）ときだけ原価を載せる
+        upstream_cost_usd: fields.upstream_paid ? Number(route.upstreamCostUsd) : 0,
         upstream_tx: fields.upstream_tx ?? 'none',
         status: fields.status,
         error: fields.error,
+        flow: 'settle_last',
       };
-      // 上流が失敗したときは JPYC を受領済み（手動返金の対象）。原価は払っていないので 0 にする
-      if (fields.status !== 'ok' && !fields.upstream_tx) entry.upstream_cost_usd = 0;
       deps.log.write(entry);
+      let header = '';
+      try {
+        header = Buffer.from(toLogLine(entry)).toString('base64');
+      } catch {
+        header = '';
+      }
+      const out: Record<string, string> = {};
+      if (header) out['x-payment-log'] = header;
+      return out;
     };
 
-    // ゲートウェイ側の事前検査（金額の完全一致・nonce の再送など）。通らなければ facilitator に投げない
-    const pre = precheckPayment(payload, requirements, nonces, Math.floor(now().getTime() / 1000));
-    if (!pre.ok) {
-      write({ status: 'verify_failed', payer: pre.payer, error: `precheck: ${pre.reason}` });
-      return paymentRequired(pre.reason);
+    if (!chosen || !fac) {
+      const h = write({ status: 'verify_failed', payer: 'unknown', error: `precheck: network_not_accepted (${network})` });
+      return paymentRequired('network_not_accepted', h);
     }
 
-    const t0 = Date.now();
+    // 事前検査（金額の完全一致・期限・nonce の形）。通らなければ facilitator に投げない
+    const pre = precheckPayment(payload, chosen, undefined, Math.floor(now().getTime() / 1000));
+    if (!pre.ok) {
+      const h = write({ status: 'verify_failed', payer: pre.payer, error: `precheck: ${pre.reason}` });
+      return paymentRequired(pre.reason, h);
+    }
+    if (await store.isBlocked(pre.payer, now().getTime())) {
+      const h = write({ status: 'verify_failed', payer: pre.payer, error: 'precheck: payer_blocked (settle failed within 24h)' });
+      return paymentRequired('payer_blocked', h);
+    }
+    // 同じ署名の再送は facilitator に投げる前に弾く（関数の間で共有するストアで確かめる）
+    if (!(await store.claimNonce(`${network}:${pre.payer}:${pre.authorization.nonce}`))) {
+      const h = write({ status: 'verify_failed', payer: pre.payer, error: 'precheck: nonce_replayed' });
+      return paymentRequired('nonce_replayed', h);
+    }
+
+    // 1. verify（まだ settle しない）
     try {
-      const v = await deps.facilitator.verify(payload, requirements);
+      const v = await fac.client.verify(payload, chosen);
       if (!v.isValid) {
         const reason = v.invalidReason ?? 'invalid';
-        write({ status: 'verify_failed', payer: pre.payer, error: `verify: ${reason}${v.invalidMessage ? ` (${v.invalidMessage})` : ''}` });
-        return paymentRequired(reason);
+        const h = write({ status: 'verify_failed', payer: pre.payer, error: `verify: ${reason}${v.invalidMessage ? ` (${v.invalidMessage})` : ''}` });
+        return paymentRequired(reason, h);
       }
       if (v.payer && v.payer.toLowerCase() !== pre.payer.toLowerCase()) {
-        write({ status: 'verify_failed', payer: pre.payer, error: `verify: payer mismatch ${v.payer}` });
-        return paymentRequired('payer_mismatch');
+        const h = write({ status: 'verify_failed', payer: pre.payer, error: `verify: payer mismatch ${v.payer}` });
+        return paymentRequired('payer_mismatch', h);
       }
     } catch (e) {
-      write({ status: 'verify_failed', payer: pre.payer, error: `verify error: ${(e as Error).message}` });
-      return json(502, { error: 'facilitator_verify_error' });
+      const h = write({ status: 'verify_failed', payer: pre.payer, error: `verify error: ${(e as Error).message}` });
+      return json(502, { error: 'facilitator_verify_error', charged: false }, h);
     }
 
-    let settled: SettleResponse;
-    try {
-      settled = await deps.facilitator.settle(payload, requirements);
-    } catch (e) {
-      // タイムアウトは結果不明（facilitator 側で settle が完了している可能性がある）。tx は Polygonscan で確認する
-      write({ status: 'settle_failed', payer: pre.payer, settle_ms: Date.now() - t0, error: `settle error: ${(e as Error).message}` });
-      return json(502, { error: 'facilitator_settle_error' });
+    // 2. 上流を仕入れる（上流への支払いの日次上限の範囲で）
+    const day = jstDay(now());
+    if (!(await store.reserveSpend(day, upstreamCostAtomic, capMicro))) {
+      const h = write({ status: 'upstream_failed', payer: pre.payer, error: `daily upstream cap reached (${Number(capMicro) / 1e6} USDC)` });
+      return json(503, { error: 'daily_capacity_reached', charged: false }, { 'retry-after': '3600', ...h });
     }
-    const settleMs = Date.now() - t0;
-    const paymentResponse = { 'payment-response': encodePaymentResponseHeader(settled) };
-    if (!settled.success || !settled.transaction) {
-      write({
-        status: 'settle_failed',
-        payer: pre.payer,
-        settle_tx: settled.transaction || 'none',
-        settle_ms: settleMs,
-        error: `settle: ${settled.errorReason ?? 'failed'}${settled.errorMessage ? ` (${settled.errorMessage})` : ''}`,
-      });
-      const pr = buildPaymentRequired({ url: resourceUrl, description: route.description, requirements, error: settled.errorReason ?? 'settle_failed' });
-      return json(402, pr, { 'payment-required': encodePaymentRequiredHeader(pr), ...paymentResponse });
-    }
-
-    // JPYC は受領済み。ここから上流（JIN）を購入する
+    const u0 = Date.now();
     const up = await deps.upstream.buy(upstreamUrl, upstreamCostAtomic);
-    // 2xx でデータが返れば成功（PAYMENT-RESPONSE が読めず tx が不明な場合も、買い手にはデータを返す）
-    const upOk = up.status >= 200 && up.status < 300;
-    if (!upOk) {
-      write({
+    upstreamMs = Date.now() - u0;
+    if (!up.paid) await store.releaseSpend(day, upstreamCostAtomic).catch(() => undefined);
+    if (up.status < 200 || up.status >= 300) {
+      // 仕入れに失敗：settle しない。買い手の署名は使われずに期限切れになる
+      const h = write({
         status: 'upstream_failed',
         payer: pre.payer,
-        settle_tx: settled.transaction,
-        settle_ms: settleMs,
         upstream_tx: up.tx,
+        upstream_paid: up.paid && !!up.tx,
         error: up.error ?? `upstream ${up.status}`,
+        timed: true,
       });
-      // 返金はこの実証では自動化しない（ログの status=upstream_failed を数えて手動で返す）
-      return json(
-        502,
-        { error: 'upstream_failed', settle_tx: settled.transaction, refund: 'manual', detail: up.error },
-        paymentResponse,
-      );
+      return json(up.status === 404 ? 404 : 502, { error: up.status === 404 ? 'not_found_upstream' : 'upstream_failed', charged: false, detail: up.error }, h);
+    }
+    if (!up.paid) {
+      // 上流が請求しなかった（OSD の未調査銘柄など）。買い手からも受け取らずに返す
+      const h = write({ status: 'free', payer: pre.payer, error: 'upstream did not charge; served free', timed: true });
+      return { status: 200, headers: { 'content-type': up.contentType ?? 'application/json', 'cache-control': 'no-store', 'x-charged': 'false', ...h }, body: up.body };
     }
 
-    write({ status: 'ok', payer: pre.payer, settle_tx: settled.transaction, settle_ms: settleMs, upstream_tx: up.tx ?? 'unknown' });
+    // 3. 仕入れに成功したので JPYC を settle
+    let settled: SettleResponse | undefined;
+    let settleError: string | undefined;
+    try {
+      settled = await fac.client.settle(payload, chosen);
+      if (!settled.success || !settled.transaction) {
+        settleError = `settle: ${settled.errorReason ?? 'failed'}${settled.errorMessage ? ` (${settled.errorMessage})` : ''}`;
+      }
+    } catch (e) {
+      settleError = `settle error: ${(e as Error).message}`;
+    }
+    if (settleError) {
+      // 上流原価の損失。データは返さず、この payer を 24 時間受け付けない
+      await store.block(pre.payer, now().getTime() + blockMs, settleError).catch(() => undefined);
+      const h = write({
+        status: 'settle_failed',
+        payer: pre.payer,
+        settle_tx: settled?.transaction || 'none',
+        upstream_tx: up.tx ?? 'unknown',
+        upstream_paid: true,
+        error: `${settleError} (upstream ${upstreamMs}ms)`,
+        timed: true,
+      });
+      const pr = buildPaymentRequired({ url: resourceUrl, description: route.description, requirements, error: settled?.errorReason ?? 'settle_failed' });
+      return json(402, pr, { 'payment-required': encodePaymentRequiredHeader(pr), ...(settled ? { 'payment-response': encodePaymentResponseHeader(settled) } : {}), ...h });
+    }
+
+    // 4. settle に成功したのでデータを返す
+    const h = write({ status: 'ok', payer: pre.payer, settle_tx: settled!.transaction, upstream_tx: up.tx ?? 'unknown', upstream_paid: true, timed: true });
     return {
       status: 200,
-      headers: { 'content-type': up.contentType ?? 'application/json', 'cache-control': 'no-store', ...paymentResponse },
+      headers: {
+        'content-type': up.contentType ?? 'application/json',
+        'cache-control': 'no-store',
+        'payment-response': encodePaymentResponseHeader(settled!),
+        ...h,
+      },
       body: up.body,
     };
   };
