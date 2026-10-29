@@ -118,8 +118,9 @@ export function loadGatewayConfig(env: NodeJS.ProcessEnv = process.env): Gateway
   }
   // プロセス内のストアは関数の間で共有できない。公開環境（Vercel）では使わない
   if (cfg.stateStore === 'memory' && env.VERCEL) throw new Error('STATE_STORE=memory is not allowed on Vercel (use blob)');
-  if ((cfg.logSink === 'blob' || cfg.stateStore === 'blob') && !cfg.blobReadWriteToken) {
-    throw new Error('missing BLOB_READ_WRITE_TOKEN (logs and shared state go to Vercel Blob)');
+  // Blob の認証は BLOB_READ_WRITE_TOKEN か、Vercel の OIDC（BLOB_STORE_ID。ストアをプロジェクトに接続すると入る）
+  if ((cfg.logSink === 'blob' || cfg.stateStore === 'blob') && !cfg.blobReadWriteToken && !env.BLOB_STORE_ID) {
+    throw new Error('missing BLOB_READ_WRITE_TOKEN or BLOB_STORE_ID (logs and shared state go to Vercel Blob)');
   }
   return cfg;
 }

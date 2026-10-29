@@ -63,16 +63,17 @@ export interface BlobBackend {
 export class WriteConflict extends Error {}
 
 export class VercelBlobBackend implements BlobBackend {
-  constructor(private readonly token: string) {}
+  /** token が無ければ @vercel/blob が OIDC（Vercel 上の関数、または VERCEL_OIDC_TOKEN + BLOB_STORE_ID）で認証する */
+  constructor(private readonly token?: string) {}
   async load(path: string) {
-    const r = await get(path, { access: 'private', useCache: false, token: this.token });
+    const r = await get(path, { access: 'private', useCache: false, ...(this.token ? { token: this.token } : {}) });
     if (!r || r.statusCode !== 200) return null;
     return { text: await new Response(r.stream).text(), etag: r.blob.etag };
   }
   async put(path: string, text: string, cond: { ifMatch: string } | { create: true }) {
     try {
       await put(path, text, {
-        access: 'private', token: this.token, addRandomSuffix: false, contentType: 'application/json',
+        access: 'private', ...(this.token ? { token: this.token } : {}), addRandomSuffix: false, contentType: 'application/json',
         ...('ifMatch' in cond ? { ifMatch: cond.ifMatch } : { allowOverwrite: false }),
       });
     } catch (e) {
@@ -103,16 +104,21 @@ const shardOf = (key: string) => {
  */
 export class BlobSharedStore implements SharedStore {
   private readonly backend: BlobBackend;
-  constructor(tokenOrBackend: string | BlobBackend, private readonly prefix = 'state') {
-    this.backend = typeof tokenOrBackend === 'string' ? new VercelBlobBackend(tokenOrBackend) : tokenOrBackend;
+  constructor(tokenOrBackend: string | undefined | BlobBackend, private readonly prefix = 'state') {
+    this.backend = tokenOrBackend === undefined || typeof tokenOrBackend === 'string' ? new VercelBlobBackend(tokenOrBackend) : tokenOrBackend;
   }
 
   static ledgerPaths(prefix = 'state') {
     return [...Array.from({ length: NONCE_SHARDS }, (_, i) => `${prefix}/nonces-${i}.json`), `${prefix}/spend.json`];
   }
 
-  /** 台帳が無ければ空で作る（npm run state:init）。作った数を返す */
+  /**
+   * 台帳が無ければ空で作る（ゲートウェイの起動時・npm run state:init）。作った数を返す。
+   * 起動のたびに 17 回読むと Blob の読み取り回数が増えるので、作り終えた印（ready.json）を 1 回読むだけで済ませる。
+   */
   async init(): Promise<number> {
+    const marker = `${this.prefix}/ready.json`;
+    if (await this.backend.load(marker)) return 0;
     let n = 0;
     for (const p of BlobSharedStore.ledgerPaths(this.prefix)) {
       if (await this.backend.load(p)) continue;
@@ -122,6 +128,11 @@ export class BlobSharedStore implements SharedStore {
       } catch (e) {
         if (!(e instanceof WriteConflict)) throw e;
       }
+    }
+    try {
+      await this.backend.put(marker, JSON.stringify({ at: new Date().toISOString() }), { create: true });
+    } catch (e) {
+      if (!(e instanceof WriteConflict)) throw e;
     }
     return n;
   }

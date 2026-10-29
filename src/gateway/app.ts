@@ -20,9 +20,11 @@ import { createHandler } from './handler.ts';
  */
 export async function createGatewayApp(cfg: GatewayConfig = loadGatewayConfig(), opts: { flushLogBeforeResponse?: boolean } = {}) {
   const routes = loadRoutes();
-  const logStore: LogStore = cfg.logSink === 'blob' ? new VercelBlobLogStore({ token: cfg.blobReadWriteToken! }) : new FileLogStore(cfg.logDir);
+  const logStore: LogStore = cfg.logSink === 'blob' ? new VercelBlobLogStore({ token: cfg.blobReadWriteToken }) : new FileLogStore(cfg.logDir);
   const log = new PaymentLogWriter(logStore);
-  const store: SharedStore = cfg.stateStore === 'blob' ? new BlobSharedStore(cfg.blobReadWriteToken!) : new MemorySharedStore();
+  const store: SharedStore = cfg.stateStore === 'blob' ? new BlobSharedStore(cfg.blobReadWriteToken) : new MemorySharedStore();
+  // 共有状態の台帳（nonce・上流の支出）を、リクエストを受ける前に作っておく（無いものだけ作る）
+  if (store instanceof BlobSharedStore) await store.init();
   const facilitators = await createNetworkFacilitators(cfg);
   const upstream = await JinUpstreamBuyer.create({ svmPrivateKey: cfg.upstreamSolanaPrivateKey });
   const networks = cfg.networks.map((n) => n.network);

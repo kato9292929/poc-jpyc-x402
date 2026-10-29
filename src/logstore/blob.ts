@@ -19,17 +19,20 @@ export interface BlobApi {
   list: typeof list;
 }
 
+/** トークンが無ければ @vercel/blob が OIDC（VERCEL_OIDC_TOKEN + BLOB_STORE_ID）で認証する */
+const auth = (token?: string) => (token ? { token } : {});
+
 export class VercelBlobLogStore implements LogStore {
   private queue: Promise<unknown> = Promise.resolve();
 
-  constructor(private readonly opts: { token: string; maxRetries?: number; api?: BlobApi }) {}
+  constructor(private readonly opts: { token?: string; maxRetries?: number; api?: BlobApi }) {}
 
   private get api(): BlobApi {
     return this.opts.api ?? { get, put, list };
   }
 
   private async load(day: string): Promise<{ text: string; etag?: string } | null> {
-    const r = await this.api.get(logPath(day), { access: 'private', useCache: false, token: this.opts.token });
+    const r = await this.api.get(logPath(day), { access: 'private', useCache: false, ...auth(this.opts.token) });
     if (!r || r.statusCode !== 200) return null;
     return { text: await new Response(r.stream).text(), etag: r.blob.etag };
   }
@@ -56,7 +59,7 @@ export class VercelBlobLogStore implements LogStore {
       try {
         await this.api.put(logPath(day), body, {
           access: 'private',
-          token: this.opts.token,
+          ...auth(this.opts.token),
           contentType: 'application/x-ndjson',
           addRandomSuffix: false,
           // 既存なら ETag が一致するときだけ上書き。新規なら上書きを許さない（同時に作られたら失敗→やり直し）
@@ -75,7 +78,7 @@ export class VercelBlobLogStore implements LogStore {
     const out: string[] = [];
     let cursor: string | undefined;
     do {
-      const r = await this.api.list({ prefix: 'log/', cursor, token: this.opts.token });
+      const r = await this.api.list({ prefix: 'log/', cursor, ...auth(this.opts.token) });
       for (const b of r.blobs) {
         const m = /^log\/(\d{4}-\d{2}-\d{2})\.jsonl$/.exec(b.pathname);
         if (m) out.push(m[1]);
