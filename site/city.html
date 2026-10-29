@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>x402jp — x402 × JPYC</title>
+<meta name="description" content="現実世界とデジタル経済の垣根をなくし、資本がより滑らかに循環する x402 × JPYC エコシステム。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;600;700&display=swap">
+<link rel="preload" as="image" href="https://d2ol7oe51mr4n9.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/33150b94-09f7-47da-a7c9-3ae76c2dd7eb.jpg">
+<style>
+:root{
+  --u:clamp(.72px,min(calc(100vw/1440),calc(100vh/960)),1.5px);
+  --night:#0f1626;--ink:#f4f6fa;--ink72:rgba(244,246,250,.72);--ink46:rgba(244,246,250,.46);
+  --pill:#2a3245;--lime:#c6ff2e;--cyan:#3fd8ff;--hair:rgba(255,255,255,.22);
+  --font:"Inter Tight","Noto Sans JP",system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--night);color:var(--ink);font-family:var(--font);-webkit-font-smoothing:antialiased;overflow-x:hidden}
+a{color:inherit;text-decoration:none}
+
+/* scroll track + sticky scene */
+.track{position:relative;height:420vh}
+.scene{position:sticky;top:0;height:100vh;overflow:hidden;background:var(--night)}
+.scene video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.scene::after{content:"";position:absolute;inset:0;pointer-events:none;
+  background:linear-gradient(to bottom,rgba(15,22,38,.55) 0%,rgba(15,22,38,0) 34%),
+             linear-gradient(to top,rgba(15,22,38,.5) 0%,rgba(15,22,38,0) 30%)}
+
+/* nav */
+nav{position:fixed;top:0;left:0;right:0;z-index:10;height:calc(58*var(--u));padding:0 calc(28*var(--u));
+  display:grid;grid-template-columns:1fr auto 1fr;align-items:center}
+.nl{display:flex;gap:calc(28*var(--u))}
+.lbl{font-weight:500;font-size:calc(11.5*var(--u));letter-spacing:.06em;text-transform:uppercase}
+.nl a{color:var(--ink72);transition:color .2s}.nl a:hover{color:var(--ink)}
+.mark{font-weight:700;font-size:calc(19*var(--u));letter-spacing:.06em}
+.nr{display:flex;gap:calc(8*var(--u));justify-content:flex-end}
+.pill{height:calc(40*var(--u));padding:0 calc(18*var(--u));border-radius:999px;display:inline-flex;align-items:center;
+  font-weight:600;font-size:calc(11*var(--u));letter-spacing:.06em;text-transform:uppercase;transition:transform .2s}
+.pill:hover{transform:translateY(-1px)}
+.pill.g{background:var(--pill);color:var(--ink)}
+.pill.l{background:var(--lime);color:#11160a}
+
+/* hero copy */
+.stage{position:fixed;left:0;right:0;top:calc(92*var(--u));z-index:5;perspective:calc(900*var(--u));display:flex;justify-content:center;pointer-events:none}
+.hero{text-align:center;transform-origin:50% 100%;will-change:transform,opacity;padding:0 20px}
+.kicker{font-weight:600;font-size:calc(11.5*var(--u));letter-spacing:.06em;text-transform:uppercase;color:var(--cyan);margin-bottom:calc(18*var(--u))}
+h1{font-weight:600;font-size:calc(84*var(--u));line-height:.96;letter-spacing:-.045em}
+h1 .jp{letter-spacing:-.02em;line-height:1.12}
+h1 .ln{white-space:nowrap}
+.sub{margin-top:calc(26*var(--u));font-size:calc(18*var(--u));line-height:1.5;color:var(--ink72)}
+.sub span{display:block}
+
+/* scroll cue */
+.cue{position:fixed;left:50%;bottom:calc(36*var(--u));transform:translateX(-50%);z-index:5;
+  font-weight:500;font-size:calc(11*var(--u));letter-spacing:.06em;text-transform:uppercase;padding-bottom:6px;white-space:nowrap}
+.cue i{position:absolute;left:0;bottom:0;height:1px;width:100%;background:var(--ink);transform-origin:left}
+
+/* process */
+.proc{position:fixed;left:calc(36*var(--u));bottom:calc(28*var(--u));width:calc(430*var(--u));z-index:6;opacity:0;list-style:none}
+.proc li{display:grid;grid-template-columns:calc(36*var(--u)) 1fr;column-gap:calc(14*var(--u));align-items:start;padding:calc(7*var(--u)) 0}
+.num{width:calc(36*var(--u));height:calc(26*var(--u));display:grid;place-items:center;border-radius:calc(6*var(--u));
+  font-weight:600;font-size:calc(11.5*var(--u));color:var(--ink72);transition:background .45s,color .45s}
+.ttl{font-weight:500;font-size:calc(12.5*var(--u));color:var(--ink72);line-height:calc(26*var(--u));transition:font-size .45s,color .45s}
+.body{grid-column:2;display:grid;grid-template-rows:0fr;transition:grid-template-rows .45s}
+.body>div{overflow:hidden}
+.body p{border-left:1px solid var(--hair);padding:calc(4*var(--u)) 0 calc(4*var(--u)) calc(14*var(--u));margin-top:calc(6*var(--u));
+  font-size:calc(14*var(--u));line-height:1.55;color:var(--ink72)}
+.proc li.on .num{background:var(--ink);color:var(--night)}
+.proc li.on .ttl{font-size:calc(18*var(--u));color:var(--ink)}
+.proc li.on .body{grid-template-rows:1fr}
+
+/* loader */
+.loader{position:fixed;inset:0;z-index:50;background:var(--night);display:grid;place-items:center;transition:opacity .6s}
+.loader.out{opacity:0;pointer-events:none}
+.lw{position:relative;width:220px;height:220px;display:grid;place-items:center}
+.lw .e{position:absolute;border:1.5px dotted var(--hair);border-radius:50%}
+.lw .e1{width:220px;height:110px}.lw .e2{width:130px;height:130px}
+.spin{width:64px;height:64px;position:relative;animation:sp 1.6s cubic-bezier(.65,0,.35,1) infinite}
+.spin b{position:absolute;left:29px;top:29px;width:6px;height:6px;background:var(--cyan)}
+.spin svg{position:absolute;left:22px;top:22px}
+@keyframes sp{to{transform:rotate(360deg)}}
+
+@media (prefers-reduced-motion:reduce){
+  .spin{animation:none}
+  *{transition:none!important}
+}
+
+/* phone */
+@media (max-width:760px){
+  :root{--u:1px}
+  nav{padding:0 18px;grid-template-columns:auto 1fr}
+  .nl{display:none}
+  .nr .pill{height:34px;padding:0 13px}
+  .stage{top:96px}
+  h1{font-size:clamp(38px,11vw,48px)}
+  h1 .ln{display:block}
+  h1 br{display:none}
+  .sub{font-size:15px;max-width:34ch;margin-left:auto;margin-right:auto}
+  .sub span{display:inline}
+  .proc{left:18px;right:18px;width:auto;bottom:22px}
+  .cue{bottom:22px}
+}
+</style>
+</head>
+<body>
+<div class="loader" id="loader" aria-hidden="true">
+  <div class="lw">
+    <div class="e e1"></div><div class="e e2"></div>
+    <div class="spin" id="spin">
+      <b style="transform:rotate(0deg) translateY(-26px)"></b><b style="transform:rotate(60deg) translateY(-26px)"></b><b style="transform:rotate(120deg) translateY(-26px)"></b><b style="transform:rotate(180deg) translateY(-26px)"></b><b style="transform:rotate(240deg) translateY(-26px)"></b><b style="transform:rotate(300deg) translateY(-26px)"></b>
+      <svg width="20" height="20" viewBox="0 0 20 20"><path d="M6 3l8 7-8 7" fill="none" stroke="#c6ff2e" stroke-width="3" stroke-linecap="square"/></svg>
+    </div>
+  </div>
+</div>
+
+<nav>
+  <div class="nl"><a class="lbl" href="https://jpyc.x402jp.com/openapi.json">Endpoints</a><a class="lbl" href="#track">How it works</a></div>
+  <a class="mark" href="#">x402jp</a>
+  <div class="nr">
+    <a class="pill g" href="https://jpyc.x402jp.com/openapi.json">Docs</a>
+    <a class="pill l" href="https://jpyc.x402jp.com/jin/series">Try 402</a>
+  </div>
+</nav>
+
+<div class="stage">
+  <div class="hero" id="hero">
+    <div class="kicker">x402 × JPYC</div>
+    <h1><span class="jp"><span class="ln">現実世界と</span><span class="ln">デジタル経済の</span><br><span class="ln">垣根をなくす</span></span></h1>
+    <p class="sub">
+      <span>資本がより滑らかに循環する、x402 × JPYC エコシステム。</span>
+      <span>AI エージェントが日本円ステーブルコインで、データ API を 1 回ずつ買う。</span>
+      <span>口座も契約もいらない。HTTP 402 と署名ひとつで、支払いが完了する。</span>
+    </p>
+  </div>
+</div>
+
+<div class="cue lbl" id="cue">Scroll to discover our process<i id="cueLine"></i></div>
+
+<ol class="proc" id="proc">
+  <li class="on"><span class="num">01</span><span class="ttl">402 で価格がわかる</span>
+    <div class="body"><div><p>有料の API を呼ぶと、HTTP 402 で価格（JPYC）と支払い条件が返ります。事前の登録も API キーもいりません。</p></div></div></li>
+  <li><span class="num">02</span><span class="ttl">署名だけで支払う</span>
+    <div class="body"><div><p>エージェントは EIP-3009 の署名を付けて呼び直すだけ。ガス代は不要で、データが届いたときだけ JPYC が動きます。</p></div></div></li>
+  <li><span class="num">03</span><span class="ttl">届いたときだけ請求</span>
+    <div class="body"><div><p>上流のデータを取れたときだけ settle。失敗したら署名は使われず、JPYC は動きません。</p></div></div></li>
+  <li><span class="num">04</span><span class="ttl">数秒で受け取る</span>
+    <div class="body"><div><p>Polygon で settle し、数秒でデータが返ります。</p></div></div></li>
+</ol>
+
+<div class="track" id="track">
+  <div class="scene">
+    <video id="v" muted playsinline preload="auto"
+      poster="https://d2ol7oe51mr4n9.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/33150b94-09f7-47da-a7c9-3ae76c2dd7eb.jpg"></video>
+  </div>
+</div>
+
+<script>
+(() => {
+  const SRC_DESK = 'https://d2ol7oe51mr4n9.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/65fdef53-5686-4659-8761-52d61bf1a4f7.mp4';
+  const SRC_SMALL = 'https://d2ol7oe51mr4n9.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/9a30e5e9-9f03-4755-9bc1-7bcf1510aab3.mp4';
+  const DUR = 5.04;
+  const v = document.getElementById('v'), track = document.getElementById('track');
+  const hero = document.getElementById('hero'), proc = document.getElementById('proc');
+  const cue = document.getElementById('cue'), cueLine = document.getElementById('cueLine');
+  const rows = [...proc.children], loader = document.getElementById('loader');
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const rec = new URLSearchParams(location.search).get('rec') === '1';
+
+  v.src = innerWidth <= 900 ? SRC_SMALL : SRC_DESK;
+
+  const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+  const range = (p, a, b) => clamp((p - a) / (b - a));
+  const eio = (t) => (t < .5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
+
+  const progress = () => {
+    const top = track.getBoundingClientRect().top + scrollY;
+    return clamp((scrollY - top) / (track.offsetHeight - innerHeight));
+  };
+
+  const ui = (p) => {
+    const h = eio(clamp(p / .38));
+    hero.style.transform = `translateY(${-34 * h}vh) rotateX(${62 * h}deg) scale(${1 - .12 * h})`;
+    hero.style.opacity = 1 - range(p, .10, .24);
+    const r = range(p, .08, .24);
+    proc.style.opacity = r;
+    proc.style.transform = `translateY(${40 * (1 - r)}px)`;
+    const active = p < .62 ? 0 : 1;
+    rows.forEach((li, i) => li.classList.toggle('on', i === active));
+    cueLine.style.transform = `scaleX(${1 - range(p, 0, .10)})`;
+    cue.style.opacity = 1 - range(p, .04, .12);
+  };
+
+  const dur = () => (v.duration && isFinite(v.duration) ? v.duration : DUR);
+  let cur = 0, target = 0;
+  const seek = () => {
+    if (v.seeking || v.readyState < 1) return;
+    if (Math.abs(v.currentTime - cur) > 1 / 60) v.currentTime = cur;
+  };
+  v.addEventListener('seeked', seek);
+
+  if (rec) {
+    loader.remove();
+    window.__recTime = (video, t) => {
+      const p = t < .55 ? 0 : clamp((t - .55) / DUR);
+      const top = track.getBoundingClientRect().top + scrollY;
+      scrollTo(0, top + p * (track.offsetHeight - innerHeight));
+      ui(p);
+      const ct = p * (DUR - 1 / 48);
+      if (video) video.currentTime = ct;
+      return ct;
+    };
+    const holder = { t: 0 };
+    const a = document.documentElement.animate([{ opacity: 1 }, { opacity: 1 }], { duration: 6500, fill: 'forwards' });
+    const step = () => {
+      const t = (a.currentTime || 0) / 1000;
+      holder.t = window.__recTime(v, t);
+      if (a.playState !== 'finished') requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+    return;
+  }
+
+  // loader：最初のフレームが出てから 350ms 後、遅くても 3.5 秒で消す
+  let hidden = false;
+  const hide = () => { if (hidden) return; hidden = true; loader.classList.add('out'); setTimeout(() => loader.remove(), 700); };
+  v.addEventListener('loadeddata', () => setTimeout(hide, 350), { once: true });
+  setTimeout(hide, 3500);
+
+  const tick = () => {
+    const p = progress();
+    target = p * (dur() - 1 / 48);
+    cur = reduced ? target : cur + (target - cur) * .2;
+    seek();
+    ui(p);
+    requestAnimationFrame(tick);
+  };
+  ui(progress());
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>
