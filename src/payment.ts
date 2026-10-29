@@ -25,14 +25,18 @@ export function buildRequirements(args: { network: JpycNetwork; payTo: string; p
 export function buildPaymentRequired(args: {
   url: string;
   description: string;
-  requirements: PaymentRequirements;
+  /** 1 件、またはチェーンごとに並べた複数件（買い手はどれか 1 つで払う） */
+  requirements: PaymentRequirements | PaymentRequirements[];
   error?: string;
+  /** Bazaar などの拡張（カタログ用の入力・出力の形） */
+  extensions?: Record<string, unknown>;
 }): PaymentRequired {
   return {
     x402Version: 2,
     error: args.error ?? 'Payment required',
     resource: { url: args.url, description: args.description, mimeType: 'application/json' },
-    accepts: [args.requirements],
+    accepts: Array.isArray(args.requirements) ? args.requirements : [args.requirements],
+    ...(args.extensions ? { extensions: args.extensions } : {}),
   };
 }
 
@@ -46,7 +50,7 @@ interface Authorization {
 }
 
 export type PrecheckResult =
-  | { ok: true; payer: string; authorization: Authorization }
+  | { ok: true; payer: string; authorization: Authorization; validBefore: number }
   | { ok: false; payer: string; reason: string };
 
 const isUintString = (v: unknown): v is string => typeof v === 'string' && /^\d+$/.test(v);
@@ -56,12 +60,12 @@ const isUintString = (v: unknown): v is string => typeof v === 'string' && /^\d+
  * - 402 で提示した要求（ネットワーク・資産・受取先・金額）と一致しているか
  * - authorization.value が提示額と完全一致しているか（文字列として一致。"2e18" や先頭 0 も不可）
  * - nonce が 32 バイト、validBefore が 5 分以内
- * - 同じ nonce を直近に受け取っていないか（最後に確認し、通ったものだけ記録する）
+ * - 同じ nonce を直近に受け取っていないか（nonces を渡したとき。最後に確認し、通ったものだけ記録する）
  */
 export function precheckPayment(
   payload: PaymentPayload,
   req: PaymentRequirements,
-  nonces: NonceCache,
+  nonces: NonceCache | undefined,
   nowSec = Math.floor(Date.now() / 1000),
 ): PrecheckResult {
   const auth = (payload?.payload as { authorization?: Partial<Authorization> } | undefined)?.authorization;
@@ -92,6 +96,7 @@ export function precheckPayment(
   if (typeof auth.nonce !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(auth.nonce)) return fail('invalid_nonce');
   if (/^0x0{64}$/.test(auth.nonce)) return fail('invalid_nonce');
 
-  if (!nonces.claim(auth.nonce, validBefore)) return fail('nonce_replayed');
-  return { ok: true, payer, authorization: auth as Authorization };
+  // nonces を渡さないときは、呼び出し側が共有ストアで再送を確かめる（Vercel では関数の間で共有するため）
+  if (nonces && !nonces.claim(auth.nonce, validBefore)) return fail('nonce_replayed');
+  return { ok: true, payer, authorization: auth as Authorization, validBefore };
 }

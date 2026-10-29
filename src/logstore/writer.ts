@@ -8,6 +8,8 @@ import type { LogStore } from './types.ts';
 export class PaymentLogWriter {
   private pending = new Set<Promise<void>>();
   failures = 0;
+  /** 直近の書き込み失敗の理由（/healthz に出す。行の中身は含めない） */
+  lastError?: string;
 
   constructor(
     private readonly store: LogStore,
@@ -28,6 +30,7 @@ export class PaymentLogWriter {
       .append(dayOfTs(entry.ts), line)
       .catch((e) => {
         this.failures++;
+        this.lastError = String((e as Error)?.message ?? e).slice(0, 200);
         this.onError(e, line);
       })
       .finally(() => this.pending.delete(p));

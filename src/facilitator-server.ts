@@ -12,8 +12,9 @@ import type { PaymentPayload, PaymentRequirements } from '@x402/core/types';
 import { toFacilitatorEvmSigner } from '@x402/evm';
 import { ExactEvmScheme } from '@x402/evm/exact/facilitator';
 import { createWalletClient, getAddress, http, isAddress, publicActions } from 'viem';
+import type { FacilitatorClient } from '@x402/core/http';
+import { NETWORK_SPECS } from './networks.ts';
 import { privateKeyToAccount } from 'viem/accounts';
-import { polygon, polygonAmoy } from 'viem/chains';
 import { timingSafeEqual } from 'node:crypto';
 import { JPYC_ADDRESS, JPYC_NETWORKS, POLYGON_MAINNET, jpycToAtomic, type JpycNetwork } from './jpyc.ts';
 
@@ -61,13 +62,41 @@ export function allowedRequirement(cfg: FacilitatorServerConfig, req: PaymentReq
   return undefined;
 }
 
-export function createFacilitatorApp(cfg: FacilitatorServerConfig) {
+/** relayer の鍵で動く参照実装の facilitator（x402Facilitator）。HTTP を通さずにゲートウェイの中からも使う */
+export function createRelayerFacilitator(cfg: Pick<FacilitatorServerConfig, 'network' | 'rpcUrl' | 'relayerPrivateKey'>) {
   const account = privateKeyToAccount(cfg.relayerPrivateKey);
-  const client = createWalletClient({ account, chain: cfg.network === POLYGON_MAINNET ? polygon : polygonAmoy, transport: http(cfg.rpcUrl) }).extend(
-    publicActions,
-  );
+  const client = createWalletClient({ account, chain: NETWORK_SPECS[cfg.network].chain, transport: http(cfg.rpcUrl) }).extend(publicActions);
   const signer = toFacilitatorEvmSigner(Object.assign(client, { address: account.address }) as never, { confirmationTimeoutMs: 45_000 });
-  const facilitator = new x402Facilitator().register(cfg.network, new ExactEvmScheme(signer));
+  return { facilitator: new x402Facilitator().register(cfg.network, new ExactEvmScheme(signer)), relayer: account.address };
+}
+
+/**
+ * ゲートウェイの中で使う自前ホストの facilitator（FacilitatorClient と同じ形）。
+ * relayer のガスを守るため、allowedRequirement に通るもの（JPYC・自社の payTo・上限額以下）しか扱わない。
+ */
+export function createLocalFacilitatorClient(cfg: FacilitatorServerConfig): FacilitatorClient & { relayer: string } {
+  const { facilitator, relayer } = createRelayerFacilitator(cfg);
+  return {
+    relayer,
+    async verify(p: PaymentPayload, r: PaymentRequirements) {
+      const bad = allowedRequirement(cfg, r);
+      if (bad) return { isValid: false, invalidReason: bad };
+      return facilitator.verify(p, r);
+    },
+    async settle(p: PaymentPayload, r: PaymentRequirements) {
+      const bad = allowedRequirement(cfg, r);
+      if (bad) return { success: false, errorReason: bad, transaction: '', network: r.network };
+      return facilitator.settle(p, r);
+    },
+    async getSupported() {
+      return facilitator.getSupported() as never;
+    },
+  } as FacilitatorClient & { relayer: string };
+}
+
+export function createFacilitatorApp(cfg: FacilitatorServerConfig) {
+  const { facilitator, relayer } = createRelayerFacilitator(cfg);
+  const account = { address: relayer };
 
   const app = express();
   app.disable('x-powered-by');

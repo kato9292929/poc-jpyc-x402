@@ -26,13 +26,16 @@ JIN（jin.x402jp.com）を既存の x402（Solana / USDC）で購入    src/upst
 
 | 項目 | 決定 | 理由・根拠 |
 |---|---|---|
-| 対象チェーン | Polygon mainnet のみ（`eip155:137`） | 指示書 §0 |
-| 販売エンドポイント・価格 | `/jin/latest`（0）・`/jin/series`（2 JPYC）・`/jin/movers`（3 JPYC） | 初期値のまま。`PRICE_SERIES_JPYC` / `PRICE_MOVERS_JPYC` で変更可 |
+| 対象チェーン | Polygon（`eip155:137`、CDP）・Avalanche（`eip155:43114`、自前）。Kaia は外した（指示により。`ENABLED_NETWORKS` に足せば使える）、Ethereum は無効 | 指示書4 §4。CDP の `/supported` の exact は 137 のみ対応（43114・8217・1 は無い）。Ethereum は「CDP が対応していれば」の条件なので無効。JPYC の domain は 4 チェーンとも資金なしの simulate で確認（2026-10-29） |
+| 販売エンドポイント・価格 | `/jin/latest`（0）・`/jin/series`（2 JPYC）・`/jin/movers`（3 JPYC）・`/osd/catalyst/{ticker}`（1 JPYC、上流 0.001 USDC） | `PRICE_SERIES_JPYC` / `PRICE_MOVERS_JPYC` / `PRICE_OSD_JPYC` で変更可。上流の 402 の額が想定と違えば仕入れない |
+| 処理の順番 | verify → 上流を仕入れ → settle → データを返す（2026-10-30〜） | 指示書4 §1。上流で落ちたら settle しない（買い手の JPYC は動かない）。上流が取れて settle が失敗したらデータは返さず `settle_failed_after_upstream`、その支払者を 24 時間ブロック |
 | JPYC の EIP-712 domain | `name: "JPY Coin"` / `version: "1"` | mainnet・Amoy の両方で、この domain の署名をコントラクトが受け入れることを確認（`npm run jpyc:domain-check`）。コントラクトに `version()` は無い |
 | facilitator | **A（CDP Facilitator）を採用** | `/supported` に `eip155:137` の `exact` があり、JPYC で verify / settle が 2 件とも 1 回で通った（下表）。B は使っていない |
 | B（自前ホスト） | 予備として実装のみ（`src/facilitator-server.ts`、`npm run facilitator:serve`） | x402 の参照実装（`@x402/evm`）を使用。CDP が使えなくなったときに `FACILITATOR_URL` を向け替える。relayer ウォレット `0x41ff0e098Cd675ACe5F1BdCf58042cDE9e802BBd`（Polygon、POL 0.5 入金済み・未使用） |
 | Phase 0（Amoy） | **実施しない** | 指示書2の決定。mainnet を少額で行った |
-| 実行場所 | ゲートウェイ・買い手ともに作業用コンテナ内（`localhost`） | 指示書2の決定。Vercel へのデプロイは行っていない |
+| 実行場所 | ゲートウェイは Vercel Functions（`https://jpyc.x402jp.com`）、買い手は GitHub Actions | 指示書4 §2（それまではコンテナ内の localhost） |
+| 関数間で共有する状態 | Vercel Blob（nonce の使用済み記録・支払者のブロック・上流の日次支出） | メモリ・ファイルは関数ごとに別になるので使わない。Upstash は増やさず、既に使っている Blob で足りる。nonce と支出は、先に作っておいた台帳（`npm run state:init`）を ETag 比較つきの書き込み（ifMatch）でだけ更新するので、同じ署名が同時に届いても通るのは 1 回だけ（「無ければ作る」の排他は文書で保証されていないので判定に使わない）。本番の Blob でも `npm run state:race-check` で確認する |
+| 上流の支出上限 | 1 日（JST）2 USDC、超えたら 503 | 指示書4 §2 |
 | 定期実行 | GitHub Actions の cron（毎日 06:30 JST、1 日 10 JPYC・30 日間） | 指示書3の決定。下の「定期実行」を参照 |
 
 ### Phase 1 の結果（2026-10-18、Polygon mainnet、facilitator = CDP）
@@ -98,7 +101,8 @@ B は relayer のガスを守るため、JPYC・`FACILITATOR_ALLOWED_PAY_TO`・`
 
 ## 定期実行（GitHub Actions、指示書3）
 
-`.github/workflows/daily-buy.yml`。毎日 06:30 JST に 1 回、ジョブ内でゲートウェイを localhost に起動し、買い手がそこから買う。
+`.github/workflows/daily-buy.yml`。毎日 06:30 JST に 1 回、買い手が公開ゲートウェイ（`https://jpyc.x402jp.com`、リポジトリ変数 `GATEWAY_URL` で上書き可）から買う。
+ゲートウェイはジョブ内では起動しない（2026-10-30〜。それまでは localhost に起動していた）。
 
 | 項目 | 設定 |
 |---|---|
@@ -107,22 +111,37 @@ B は relayer のガスを守るため、JPYC・`FACILITATOR_ALLOWED_PAY_TO`・`
 | 期間 | 2026-10-25〜2026-11-23（30 日、`RUN_START_JST` / `RUN_UNTIL_JST`。リポジトリ変数で上書き可）。期間外のジョブは何も支払わずに終わる |
 | 失敗 | verify・settle の失敗、上流の失敗（`upstream_failed`）はログに残して次へ。同じ日の失敗が 5 件を超えたら、その日の残りは支払わない |
 | 残高 | 始める前に、その日の計画分の JPYC（買い手）と USDC（上流購入用）があるかを確かめ、足りなければ支払わない |
-| 鍵 | GitHub Secrets：`GATEWAY_ENV`（CDP キー・上流購入用の鍵）はゲートウェイの手順だけ、`BUYER_ENV`（買い手の鍵）は買い手の手順だけに渡す |
-| 記録 | 決済ログ `log/YYYY-MM-DD.jsonl`、買い手の記録 `log/buyer/YYYY-MM-DD.jsonl`、集計 `summary.json` を毎日コミットする |
+| 鍵 | GitHub Secrets は `BUYER_ENV`（買い手の鍵）だけ。CDP キー・上流購入用の鍵・relayer の鍵は Vercel の Sensitive な環境変数にだけ置く |
+| 記録 | 決済ログ `log/YYYY-MM-DD.jsonl`（ゲートウェイが応答の `X-PAYMENT-LOG` で返す 1 行を買い手が書く。正本は Vercel Blob）、買い手の記録 `log/buyer/YYYY-MM-DD.jsonl`、集計 `summary.json` を毎日コミットする |
 
 `summary.json`：累計件数・status 別件数・成功率、settle 時間の中央値と最大、累計 JPYC（受領）、累計上流 USDC、
 CDP が負担したガス代の合計（settle tx の receipt から計算）。ローカルで作り直すときは `RUN_START_JST=... npx tsx scripts/summary.ts`。
 
-失敗は、お金がどこまで動いたかで 4 つの型に分けて数える（`src/failures.ts`、`summary.json` の `failures`）：
+失敗は、お金がどこまで動いたかで型に分けて数える（`src/failures.ts`、`summary.json` の `failures`）。
+2026-10-30 からの行には `flow: "settle_last"` が付き、上流で落ちた行は JPYC を受け取っていない（それより前の行は受領済み）。
 
 | 型 | お金の動き |
 |---|---|
-| JPYC の verify / settle が失敗 | JPYC 受領なし・上流 USDC 動かない |
-| 上流が未払いの段階で失敗 | JPYC 受領済み・上流 USDC 動かない |
-| 上流が支払い受領後に失敗（402 など） | JPYC 受領済み・上流 USDC 動かない（上流の tx なし） |
-| 上流は支払い済み、データを渡せず | JPYC 受領済み・上流 USDC 支払い済み（回収できない原価） |
+| JPYC の verify が失敗 | JPYC 受領なし・上流 USDC 動かない |
+| 上流が未払いの段階で失敗 | 上流 USDC 動かない（新方式では JPYC も動かない） |
+| 上流が支払い受領後に失敗（402 など） | 上流 USDC 動かない（上流の tx なし） |
+| 上流は支払い済み、データを受け取れず | 上流 USDC 支払い済み（回収できない原価） |
+| 上流は仕入れ済み、JPYC の settle が失敗 | 上流 USDC 支払い済み・JPYC 受領なし（回収できない原価）。支払者を 24 時間ブロック |
 
 週次レポート（Markdown）：`npm run report:weekly -- --from 2026-10-25 --to 2026-10-31 [--out reports/weekly-2026-10-25.md]`
+
+## 公開ゲートウェイ（Vercel、指示書4）
+
+```sh
+npm run vercel:stage            # esbuild で 1 ファイルにまとめ、.vercel-stage/gateway に置く
+cd .vercel-stage/gateway && vercel deploy --prod
+```
+
+- 環境変数（Sensitive）：`CDP_API_KEY_ID`・`CDP_API_KEY_SECRET`・`UPSTREAM_SOLANA_PRIVATE_KEY`・`RELAYER_PRIVATE_KEY_AVALANCHE`・`RELAYER_PRIVATE_KEY_KAIA`・`BLOB_READ_WRITE_TOKEN`。
+  ほか `PUBLIC_BASE_URL`・`JPYC_PAY_TO`・`ENABLED_NETWORKS`。payTo の秘密鍵はどこにも置かない
+- 402 の `accepts` に有効なチェーンをすべて並べ、`extensions.bazaar` に入力（パス・クエリ）と出力の例・形を入れる。`/openapi.json` は x402scan 用
+- `/healthz`：有効なチェーン・relayer のアドレス・上流の今日の支出。`?check=facilitator` で各チェーンの `/supported` も確かめる
+- 応答ヘッダ `X-CHARGED: false`：署名を settle していない（買い手の JPYC は動いていない）
 
 ## 決済ログ
 

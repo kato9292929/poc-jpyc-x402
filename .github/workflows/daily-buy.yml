@@ -1,9 +1,7 @@
-# 定期実行（指示書3）：毎日 06:30 JST に、ジョブ内でゲートウェイを localhost に起動し、
-# 買い手が /jin/series 2 回 + /jin/movers 2 回（= 10 JPYC）を買う。決済ログと summary.json をコミットする。
-#
-# 鍵は GitHub Secrets に役割ごとに分けて置く（ゲートウェイの手順にだけ GATEWAY_ENV、買い手の手順にだけ BUYER_ENV を渡す）。
-#   GATEWAY_ENV: CDP_API_KEY_ID / CDP_API_KEY_SECRET / UPSTREAM_SOLANA_PRIVATE_KEY（dotenv 形式）
-#   BUYER_ENV:   BUYER_PRIVATE_KEY（dotenv 形式）
+# 定期実行：毎日 06:30 JST に、公開ゲートウェイ（https://jpyc.x402jp.com）から /jin/series 2 回 + /jin/movers 2 回（= 10 JPYC）を買う。
+# 公開経路（402 → 署名 → verify → 上流の仕入れ → settle）が毎日動いていることを確かめる役。
+# ゲートウェイは Vercel で常時動いているので、このジョブでは起動しない。鍵は買い手の BUYER_ENV だけを使う。
+# 決済ログはゲートウェイが返す X-PAYMENT-LOG を log/YYYY-MM-DD.jsonl に、買い手の記録を log/buyer/ に残し、summary.json と一緒にコミットする。
 # 期間は RUN_START_JST〜RUN_UNTIL_JST（リポジトリ変数で上書き可）。期間外は何も支払わずに終わる。
 name: daily-buy
 
@@ -27,7 +25,7 @@ env:
   SOLANA_RPC_URL: https://api.mainnet-beta.solana.com
   JPYC_PAY_TO: '0xb04c275C85ddb34CdF1A6f48A4A749f969377a6e'
   UPSTREAM_SOLANA_ADDRESS: 3EX6L11khPXTRC6wdRbrEibHi8tH7TZ1PRTYSX7R218f
-  GATEWAY_PORT: '8788'
+  GATEWAY_URL: ${{ vars.GATEWAY_URL || 'https://jpyc.x402jp.com' }}
 
 jobs:
   buy:
@@ -59,34 +57,12 @@ jobs:
         if: steps.period.outputs.active == 'true'
         run: npm ci
 
-      - name: Start gateway (localhost)
-        if: steps.period.outputs.active == 'true'
-        env:
-          GATEWAY_ENV: ${{ secrets.GATEWAY_ENV }}
-          PORT: ${{ env.GATEWAY_PORT }}
-          PUBLIC_BASE_URL: http://localhost:${{ env.GATEWAY_PORT }}
-          FACILITATOR_URL: https://api.cdp.coinbase.com/platform/v2/x402
-          UPSTREAM_JIN_BASE_URL: https://jin.x402jp.com
-          LOG_SINK: file
-          LOG_DIR: log
-        run: |
-          test -n "$GATEWAY_ENV" || { echo "missing secret GATEWAY_ENV"; exit 1; }
-          umask 077
-          printf '%s\n' "$GATEWAY_ENV" > "$RUNNER_TEMP/gateway.env"
-          DOTENV_CONFIG_PATH="$RUNNER_TEMP/gateway.env" nohup npx tsx src/gateway/server.ts > "$RUNNER_TEMP/gateway.log" 2>&1 &
-          echo $! > "$RUNNER_TEMP/gateway.pid"
-          for i in $(seq 1 60); do
-            curl -fs "http://localhost:$PORT/healthz" > /dev/null && { echo "gateway up"; exit 0; }
-            kill -0 "$(cat "$RUNNER_TEMP/gateway.pid")" 2>/dev/null || break
-            sleep 1
-          done
-          echo "gateway did not start"; tail -n 30 "$RUNNER_TEMP/gateway.log"; exit 1
-
       - name: Buy (10 JPYC / day)
         if: steps.period.outputs.active == 'true'
         env:
           BUYER_ENV: ${{ secrets.BUYER_ENV }}
-          GATEWAY_URL: http://localhost:${{ env.GATEWAY_PORT }}
+          GATEWAY_URL: ${{ env.GATEWAY_URL }}
+          GATEWAY_LOG_DIR: log
           BUYER_PLAN: /jin/series:2,/jin/movers:2
           BUYER_INTERVAL_MS: '3000'
           BUYER_DAILY_CAP_JPYC: '10'
@@ -101,17 +77,6 @@ jobs:
           printf '%s\n' "$BUYER_ENV" > "$RUNNER_TEMP/buyer.env"
           DOTENV_CONFIG_PATH="$RUNNER_TEMP/buyer.env" npx tsx agents/buyer/index.ts
           rm -f "$RUNNER_TEMP/buyer.env"
-
-      - name: Stop gateway
-        if: always() && steps.period.outputs.active == 'true'
-        run: |
-          if [ -f "$RUNNER_TEMP/gateway.pid" ]; then
-            # npx → tsx → node と子が続くので、コマンドラインで探して止める（SIGTERM でログを書き切ってから終わる）
-            pkill -TERM -f "src/gateway/server.ts" 2>/dev/null || true
-            for i in $(seq 1 10); do pgrep -f "src/gateway/server.ts" > /dev/null || break; sleep 1; done
-          fi
-          rm -f "$RUNNER_TEMP/gateway.env"
-          echo "--- gateway log (tail) ---"; tail -n 40 "$RUNNER_TEMP/gateway.log" 2>/dev/null || true
 
       - name: Summary
         if: always() && steps.period.outputs.active == 'true'

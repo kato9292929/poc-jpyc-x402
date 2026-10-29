@@ -9,6 +9,7 @@ import { buyerOptionsFromEnv, runBuyer } from '../../src/buyer.ts';
 import { FileRecordStore } from '../../src/buyer-store.ts';
 import { makeCheckFunds } from '../../src/funds.ts';
 import { loadRoutes } from '../../src/routes.ts';
+import { FileLogStore } from '../../src/logstore/file.ts';
 
 const env = process.env;
 const store = new FileRecordStore(env.BUYER_LOG_DIR || join(env.LOG_DIR || 'log', 'buyer'));
@@ -22,5 +23,10 @@ if (env.BUYER_UPSTREAM_SOLANA_ADDRESS) {
   opts.costs = Object.fromEntries(loadRoutes(env).map((r) => [r.path, { priceJpyc: r.priceJpyc, upstreamCostUsd: r.upstreamCostUsd }]));
 }
 const r = await runBuyer(opts);
+// ゲートウェイの決済ログ（X-PAYMENT-LOG）を、ゲートウェイのログと同じ形で GATEWAY_LOG_DIR/YYYY-MM-DD.jsonl に残す（定期実行が log/ にコミットする）
+if (env.GATEWAY_LOG_DIR) {
+  const gw = new FileLogStore(env.GATEWAY_LOG_DIR);
+  for (const rec of r.records) if (rec.gateway_log) await gw.append(String(rec.gateway_log.ts).slice(0, 10), JSON.stringify(rec.gateway_log));
+}
 const ok = r.records.filter((x) => x.status === 'ok').length;
 console.log(`[buyer] summary: ok=${ok} records=${r.records.length} spent=${r.spentAfterJpyc} JPYC${r.stopReason ? ` stop=${r.stopReason}` : ''}`);
