@@ -13,7 +13,7 @@ const base = {
 test('LOG_SINK=file は NODE_ENV=development のときだけ', () => {
   assert.throws(() => loadGatewayConfig({ ...base, LOG_SINK: 'file' }), /development/);
   assert.equal(loadGatewayConfig({ ...base, LOG_SINK: 'file', NODE_ENV: 'development' }).logSink, 'file');
-  assert.equal(loadGatewayConfig({ ...base }).logSink, 'blob');
+  assert.equal(loadGatewayConfig({ ...base }).logSink, 'none');
   assert.equal(loadGatewayConfig({ ...base, LOG_SINK: 'file', GITHUB_ACTIONS: 'true' }).logSink, 'file');
 });
 
@@ -33,12 +33,10 @@ test('チェーン：既定は Polygon（CDP）・Avalanche・Kaia（自前ホ�
   assert.throws(() => loadGatewayConfig({ ...base, ENABLED_NETWORKS: 'eip155:999' }), /unknown network/);
 });
 
-test('受取用の鍵は置かない・Vercel ではプロセス内のストアを使わない・上流の日次上限は既定 2 USDC', () => {
+test('受取用の鍵は置かない・上流の日次上限は既定 2 USDC', () => {
   const one = { ...base, ENABLED_NETWORKS: 'eip155:137' };
   assert.throws(() => loadGatewayConfig({ ...one, PAYTO_PRIVATE_KEY: '0x1' }), /PAYTO_PRIVATE_KEY/);
-  assert.throws(() => loadGatewayConfig({ ...one, STATE_STORE: 'memory', VERCEL: '1' }), /not allowed on Vercel/);
   assert.equal(loadGatewayConfig(one).upstreamDailyCapMicro, 2_000_000n);
-  assert.equal(loadGatewayConfig(one).stateStore, 'blob');
 });
 
 test('facilitator の種別は URL から判定（旧設定の互換）', () => {

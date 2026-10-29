@@ -4,13 +4,12 @@ import { openApiDocument } from '../discovery.ts';
 import { createNetworkFacilitators, supportsExact } from '../facilitator.ts';
 import { JPYC_ADDRESS } from '../jpyc.ts';
 import { jstDay } from '../log.ts';
-import { VercelBlobLogStore } from '../logstore/blob.ts';
 import { FileLogStore } from '../logstore/file.ts';
 import type { LogStore } from '../logstore/types.ts';
 import { PaymentLogWriter } from '../logstore/writer.ts';
 import { NETWORK_SPECS } from '../networks.ts';
 import { loadRoutes } from '../routes.ts';
-import { BlobSharedStore, MemorySharedStore, type SharedStore } from '../stores.ts';
+import { MemorySharedStore, type SharedStore } from '../stores.ts';
 import { JinUpstreamBuyer } from '../upstream.ts';
 import { createHandler } from './handler.ts';
 
@@ -20,11 +19,11 @@ import { createHandler } from './handler.ts';
  */
 export async function createGatewayApp(cfg: GatewayConfig = loadGatewayConfig(), opts: { flushLogBeforeResponse?: boolean } = {}) {
   const routes = loadRoutes();
-  const logStore: LogStore = cfg.logSink === 'blob' ? new VercelBlobLogStore({ token: cfg.blobReadWriteToken }) : new FileLogStore(cfg.logDir);
+  // 本番はゲートウェイで保存しない（X-PAYMENT-LOG で買い手に返す。Actions の買い手ログが正）
+  const logStore: LogStore = cfg.logSink === 'file' ? new FileLogStore(cfg.logDir) : { append: async () => undefined, read: async () => null, days: async () => [] } as unknown as LogStore;
   const log = new PaymentLogWriter(logStore);
-  const store: SharedStore = cfg.stateStore === 'blob' ? new BlobSharedStore(cfg.blobReadWriteToken) : new MemorySharedStore();
-  // 共有状態の台帳（nonce・上流の支出）を、リクエストを受ける前に作っておく（無いものだけ作る）
-  if (store instanceof BlobSharedStore) await store.init();
+  // nonce は関数インスタンス内のメモリで弾く。インスタンスをまたぐ二重の仕入れは上流の日次上限（2 USDC）で抑える
+  const store: SharedStore = new MemorySharedStore();
   const facilitators = await createNetworkFacilitators(cfg);
   const upstream = await JinUpstreamBuyer.create({ svmPrivateKey: cfg.upstreamSolanaPrivateKey });
   const networks = cfg.networks.map((n) => n.network);
@@ -75,7 +74,7 @@ export async function createGatewayApp(cfg: GatewayConfig = loadGatewayConfig(),
       upstream: { jin: cfg.upstreamJinBaseUrl, osd: cfg.upstreamOsdBaseUrl, solanaWallet: upstream.address, spentTodayUsdc: spentToday, dailyCapUsdc: (Number(cfg.upstreamDailyCapMicro) / 1e6).toFixed(2) },
       flow: 'verify → upstream → settle',
       logSink: cfg.logSink,
-      stateStore: cfg.stateStore,
+      stateStore: 'memory',
       logWriteFailures: log.failures,
       ...(log.lastError ? { lastLogWriteError: log.lastError } : {}),
       routes: routes.map((r) => ({ path: r.path, priceJpyc: r.priceJpyc, upstreamCostUsd: r.upstreamCostUsd })),

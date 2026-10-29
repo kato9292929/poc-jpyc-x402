@@ -39,9 +39,8 @@ export interface GatewayConfig {
   /** 上流への支払いの日次上限（USDC atomic） */
   upstreamDailyCapMicro: bigint;
   /** 共有ストア：blob = Vercel Blob（本番）、memory = プロセス内（ローカル・テスト） */
-  stateStore: 'blob' | 'memory';
-  logSink: 'blob' | 'file';
-  blobReadWriteToken?: string;
+  /** none（既定・本番）: ゲートウェイでは保存しない（X-PAYMENT-LOG で買い手に返し、Actions の買い手ログを正とする）。file: 開発・Actions のみ */
+  logSink: 'none' | 'file';
   logDir: string;
   /** OpenAPI の x-payment-info（USD 建て）に入れる参考レート */
   jpycUsdRate: number;
@@ -86,7 +85,7 @@ export function loadGatewayConfig(env: NodeJS.ProcessEnv = process.env): Gateway
   }
 
   const port = Number(env.PORT || 8788);
-  const logSink = (env.LOG_SINK || 'blob') as 'blob' | 'file';
+  const logSink = (env.LOG_SINK || 'none') as 'none' | 'file';
   const cfg: GatewayConfig = {
     port,
     publicBaseUrl: (env.PUBLIC_BASE_URL || `http://localhost:${port}`).replace(/\/+$/, ''),
@@ -100,9 +99,7 @@ export function loadGatewayConfig(env: NodeJS.ProcessEnv = process.env): Gateway
     upstreamOsdBaseUrl: (env.UPSTREAM_OSD_BASE_URL || 'https://osd.x402jp.com').replace(/\/+$/, ''),
     upstreamSolanaPrivateKey: upstreamKey,
     upstreamDailyCapMicro: usdToUsdcAtomic(env.UPSTREAM_DAILY_CAP_USD || '2'),
-    stateStore: (env.STATE_STORE || (logSink === 'file' ? 'memory' : 'blob')) as 'blob' | 'memory',
     logSink,
-    blobReadWriteToken: env.BLOB_READ_WRITE_TOKEN || undefined,
     logDir: env.LOG_DIR || 'log',
     jpycUsdRate: Number(env.JPYC_USD_RATE || '0.0066'),
   };
@@ -110,17 +107,10 @@ export function loadGatewayConfig(env: NodeJS.ProcessEnv = process.env): Gateway
   if (networks.some((n) => n.facilitator === 'cdp') && (!cfg.cdpApiKeyId || !cfg.cdpApiKeySecret)) {
     console.warn('[config] CDP facilitator without CDP_API_KEY_ID / CDP_API_KEY_SECRET: verify will fail until they are set');
   }
-  if (cfg.logSink !== 'blob' && cfg.logSink !== 'file') throw new Error('LOG_SINK must be blob or file');
-  if (cfg.stateStore !== 'blob' && cfg.stateStore !== 'memory') throw new Error('STATE_STORE must be blob or memory');
+  if (cfg.logSink !== 'none' && cfg.logSink !== 'file') throw new Error('LOG_SINK must be none or file');
   // ローカルファイルへの出力は開発時だけ（poc-card-credits と同じ規則）
   if (cfg.logSink === 'file' && env.NODE_ENV !== 'development' && env.GITHUB_ACTIONS !== 'true') {
     throw new Error('LOG_SINK=file is for local development or the GitHub Actions daily run only');
-  }
-  // プロセス内のストアは関数の間で共有できない。公開環境（Vercel）では使わない
-  if (cfg.stateStore === 'memory' && env.VERCEL) throw new Error('STATE_STORE=memory is not allowed on Vercel (use blob)');
-  // Blob の認証は BLOB_READ_WRITE_TOKEN か、Vercel の OIDC（BLOB_STORE_ID。ストアをプロジェクトに接続すると入る）
-  if ((cfg.logSink === 'blob' || cfg.stateStore === 'blob') && !cfg.blobReadWriteToken && !env.BLOB_STORE_ID) {
-    throw new Error('missing BLOB_READ_WRITE_TOKEN or BLOB_STORE_ID (logs and shared state go to Vercel Blob)');
   }
   return cfg;
 }
