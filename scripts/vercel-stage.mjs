@@ -10,7 +10,7 @@ const app = process.argv[2];
 if (!APPS[app]) throw new Error(`usage: node scripts/vercel-stage.mjs ${Object.keys(APPS).join('|')}`);
 const out = join('.vercel-stage', app);
 // vercel link の結果（.vercel/）は残す
-for (const f of ['api', 'vercel.json', 'package.json']) rmSync(join(out, f), { recursive: true, force: true });
+for (const f of ['api', 'vercel.json', 'package.json', 'index.html']) rmSync(join(out, f), { recursive: true, force: true });
 mkdirSync(join(out, 'api'), { recursive: true });
 await build({
   entryPoints: [join('vercel', app, 'entry.ts')],
@@ -24,5 +24,7 @@ await build({
   banner: { js: "import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);" },
 });
 cpSync(join('vercel', app, 'vercel.json'), join(out, 'vercel.json'));
+// トップページ（/）は静的ファイル。Vercel は rewrite より先にファイルを返すので、/ 以外は従来どおり関数に行く
+if (app === 'gateway') cpSync(join('site', 'city.html'), join(out, 'index.html'));
 writeFileSync(join(out, 'package.json'), JSON.stringify({ name: `poc-jpyc-x402-${app}`, private: true, type: 'module', engines: { node: '22.x' } }, null, 2));
 console.log(`staged ${out}${existsSync(join(out, '.vercel')) ? ' (linked)' : ''}`);
