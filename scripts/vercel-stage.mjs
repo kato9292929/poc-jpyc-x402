@@ -24,7 +24,5 @@ await build({
   banner: { js: "import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);" },
 });
 cpSync(join('vercel', app, 'vercel.json'), join(out, 'vercel.json'));
-// トップページ（/）は静的ファイル。Vercel は rewrite より先にファイルを返すので、/ 以外は従来どおり関数に行く
-if (app === 'gateway') cpSync(join('site', 'city.html'), join(out, 'index.html'));
 writeFileSync(join(out, 'package.json'), JSON.stringify({ name: `poc-jpyc-x402-${app}`, private: true, type: 'module', engines: { node: '22.x' } }, null, 2));
 console.log(`staged ${out}${existsSync(join(out, '.vercel')) ? ' (linked)' : ''}`);
