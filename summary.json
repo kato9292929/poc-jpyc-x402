@@ -1,43 +1,55 @@
 {
-  "updated_at": "2026-10-28T00:40:31.276Z",
+  "updated_at": "2026-10-29T01:10:04.331Z",
   "period": {
     "start_jst": "2026-10-25",
     "until_jst": "2026-11-23"
   },
   "facilitator": "cdp",
   "network": "eip155:137",
-  "days_run": 4,
-  "payments": 16,
-  "ok": 15,
-  "success_rate": 0.9375,
+  "days_run": 5,
+  "payments": 20,
+  "ok": 19,
+  "success_rate": 0.95,
   "by_status": {
-    "ok": 15,
+    "ok": 19,
     "upstream_failed": 1
   },
   "by_endpoint": {
     "/jin/series": {
-      "payments": 8,
-      "ok": 8
+      "payments": 10,
+      "ok": 10
     },
     "/jin/movers": {
-      "payments": 8,
-      "ok": 7
+      "payments": 10,
+      "ok": 9
     }
   },
-  "settle_ms": {
-    "median": 2683,
-    "max": 3965,
-    "samples": 16
+  "failures": {
+    "jpyc_not_received": 0,
+    "upstream_before_payment": 0,
+    "upstream_after_payment": 1,
+    "upstream_paid_no_data": 0
   },
-  "jpyc_received": 40,
-  "upstream_usdc_spent": 0.22,
-  "cdp_gas_pol": "0.69262749399219374",
+  "settle_ms": {
+    "median": 2464,
+    "max": 3965,
+    "samples": 20
+  },
+  "jpyc_received": 50,
+  "upstream_usdc_spent": 0.28,
+  "cdp_gas_pol": "0.867311736075182932",
   "days": {
     "2026-10-25": {
       "payments": 4,
       "ok": 4,
       "by_status": {
         "ok": 4
+      },
+      "failures": {
+        "jpyc_not_received": 0,
+        "upstream_before_payment": 0,
+        "upstream_after_payment": 0,
+        "upstream_paid_no_data": 0
       },
       "jpyc": 10,
       "upstream_usdc": 0.06,
@@ -51,6 +63,12 @@
         "ok": 3,
         "upstream_failed": 1
       },
+      "failures": {
+        "jpyc_not_received": 0,
+        "upstream_before_payment": 0,
+        "upstream_after_payment": 1,
+        "upstream_paid_no_data": 0
+      },
       "jpyc": 10,
       "upstream_usdc": 0.04,
       "gas_wei": "176920753986045624",
@@ -61,6 +79,12 @@
       "ok": 4,
       "by_status": {
         "ok": 4
+      },
+      "failures": {
+        "jpyc_not_received": 0,
+        "upstream_before_payment": 0,
+        "upstream_after_payment": 0,
+        "upstream_paid_no_data": 0
       },
       "jpyc": 10,
       "upstream_usdc": 0.06,
@@ -73,9 +97,32 @@
       "by_status": {
         "ok": 4
       },
+      "failures": {
+        "jpyc_not_received": 0,
+        "upstream_before_payment": 0,
+        "upstream_after_payment": 0,
+        "upstream_paid_no_data": 0
+      },
       "jpyc": 10,
       "upstream_usdc": 0.06,
       "gas_wei": "166828943217346680",
+      "gas_txs": 4
+    },
+    "2026-10-29": {
+      "payments": 4,
+      "ok": 4,
+      "by_status": {
+        "ok": 4
+      },
+      "failures": {
+        "jpyc_not_received": 0,
+        "upstream_before_payment": 0,
+        "upstream_after_payment": 0,
+        "upstream_paid_no_data": 0
+      },
+      "jpyc": 10,
+      "upstream_usdc": 0.06,
+      "gas_wei": "174684242082989192",
       "gas_txs": 4
     }
   }
