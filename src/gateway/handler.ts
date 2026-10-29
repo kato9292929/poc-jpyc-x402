@@ -109,6 +109,16 @@ export function createHandler(deps: HandlerDeps) {
     const fac = chosen ? deps.facilitators[network] : undefined;
     const t0 = Date.now();
     let upstreamMs = 0;
+    // 段階ごとの所要時間（Server-Timing ヘッダで返す。遅い段階を外から見つけるため）
+    const marks: string[] = [];
+    const timed = async <T>(name: string, p: Promise<T>): Promise<T> => {
+      const s = Date.now();
+      try {
+        return await p;
+      } finally {
+        marks.push(`${name};dur=${Date.now() - s}`);
+      }
+    };
 
     const write = (fields: { status: PaymentStatus; payer: string; settle_tx?: string; upstream_tx?: string; upstream_paid?: boolean; error?: string; timed?: boolean }): Record<string, string> => {
       const entry: PaymentLogEntry = {
@@ -137,6 +147,7 @@ export function createHandler(deps: HandlerDeps) {
       }
       const out: Record<string, string> = {};
       if (header) out['x-payment-log'] = header;
+      if (marks.length) out['server-timing'] = marks.join(', ');
       return out;
     };
 
@@ -151,19 +162,19 @@ export function createHandler(deps: HandlerDeps) {
       const h = write({ status: 'verify_failed', payer: pre.payer, error: `precheck: ${pre.reason}` });
       return paymentRequired(pre.reason, h);
     }
-    if (await store.isBlocked(pre.payer, now().getTime())) {
+    if (await timed('blocked', store.isBlocked(pre.payer, now().getTime()))) {
       const h = write({ status: 'verify_failed', payer: pre.payer, error: 'precheck: payer_blocked (settle failed within 24h)' });
       return paymentRequired('payer_blocked', h);
     }
     // 同じ署名の再送は facilitator に投げる前に弾く（関数の間で共有するストアで確かめる）
-    if (!(await store.claimNonce(`${network}:${pre.payer}:${pre.authorization.nonce}`, pre.validBefore * 1000 + 10 * 60_000))) {
+    if (!(await timed('nonce', store.claimNonce(`${network}:${pre.payer}:${pre.authorization.nonce}`, pre.validBefore * 1000 + 10 * 60_000)))) {
       const h = write({ status: 'verify_failed', payer: pre.payer, error: 'precheck: nonce_replayed' });
       return paymentRequired('nonce_replayed', h);
     }
 
     // 1. verify（まだ settle しない）
     try {
-      const v = await fac.client.verify(payload, chosen);
+      const v = await timed('verify', fac.client.verify(payload, chosen));
       if (!v.isValid) {
         const reason = v.invalidReason ?? 'invalid';
         const h = write({ status: 'verify_failed', payer: pre.payer, error: `verify: ${reason}${v.invalidMessage ? ` (${v.invalidMessage})` : ''}` });
@@ -180,12 +191,12 @@ export function createHandler(deps: HandlerDeps) {
 
     // 2. 上流を仕入れる（上流への支払いの日次上限の範囲で）
     const day = jstDay(now());
-    if (!(await store.reserveSpend(day, upstreamCostAtomic, capMicro))) {
+    if (!(await timed('spend', store.reserveSpend(day, upstreamCostAtomic, capMicro)))) {
       const h = write({ status: 'upstream_failed', payer: pre.payer, error: `daily upstream cap reached (${Number(capMicro) / 1e6} USDC)` });
       return json(503, { error: 'daily_capacity_reached', charged: false }, { 'retry-after': '3600', ...h });
     }
     const u0 = Date.now();
-    const up = await deps.upstream.buy(upstreamUrl, upstreamCostAtomic);
+    const up = await timed('upstream', deps.upstream.buy(upstreamUrl, upstreamCostAtomic));
     upstreamMs = Date.now() - u0;
     if (!up.paid) await store.releaseSpend(day, upstreamCostAtomic).catch(() => undefined);
     if (up.status < 200 || up.status >= 300) {
@@ -210,7 +221,7 @@ export function createHandler(deps: HandlerDeps) {
     let settled: SettleResponse | undefined;
     let settleError: string | undefined;
     try {
-      settled = await fac.client.settle(payload, chosen);
+      settled = await timed('settle', fac.client.settle(payload, chosen));
       if (!settled.success || !settled.transaction) {
         settleError = `settle: ${settled.errorReason ?? 'failed'}${settled.errorMessage ? ` (${settled.errorMessage})` : ''}`;
       }

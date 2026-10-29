@@ -77,6 +77,7 @@ export async function createGatewayApp(cfg: GatewayConfig = loadGatewayConfig(),
       logSink: cfg.logSink,
       stateStore: cfg.stateStore,
       logWriteFailures: log.failures,
+      ...(log.lastError ? { lastLogWriteError: log.lastError } : {}),
       routes: routes.map((r) => ({ path: r.path, priceJpyc: r.priceJpyc, upstreamCostUsd: r.upstreamCostUsd })),
     });
   });
@@ -94,11 +95,15 @@ export async function createGatewayApp(cfg: GatewayConfig = loadGatewayConfig(),
         search: q >= 0 ? req.originalUrl.slice(q) : '',
         header: (n) => req.get(n) ?? undefined,
       });
-      if (opts.flushLogBeforeResponse) await log.flush();
+      if (opts.flushLogBeforeResponse) {
+        const s = Date.now();
+        await log.flush();
+        if (out.headers['server-timing']) out.headers['server-timing'] += `, log;dur=${Date.now() - s}`;
+      }
       res.status(out.status);
       for (const [k, v] of Object.entries(out.headers)) res.setHeader(k, v);
       res.setHeader('access-control-allow-origin', '*');
-      res.setHeader('access-control-expose-headers', 'PAYMENT-REQUIRED, PAYMENT-RESPONSE, X-PAYMENT-LOG, X-CHARGED');
+      res.setHeader('access-control-expose-headers', 'PAYMENT-REQUIRED, PAYMENT-RESPONSE, X-PAYMENT-LOG, X-CHARGED, Server-Timing');
       res.send(typeof out.body === 'string' ? out.body : Buffer.from(out.body));
     } catch (e) {
       console.error('[gateway] unhandled', e);
