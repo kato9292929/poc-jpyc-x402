@@ -156,7 +156,7 @@ export function createHandler(deps: HandlerDeps) {
       return paymentRequired('payer_blocked', h);
     }
     // 同じ署名の再送は facilitator に投げる前に弾く（関数の間で共有するストアで確かめる）
-    if (!(await store.claimNonce(`${network}:${pre.payer}:${pre.authorization.nonce}`))) {
+    if (!(await store.claimNonce(`${network}:${pre.payer}:${pre.authorization.nonce}`, pre.validBefore * 1000 + 10 * 60_000))) {
       const h = write({ status: 'verify_failed', payer: pre.payer, error: 'precheck: nonce_replayed' });
       return paymentRequired('nonce_replayed', h);
     }

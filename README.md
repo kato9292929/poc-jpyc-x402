@@ -34,7 +34,7 @@ JIN（jin.x402jp.com）を既存の x402（Solana / USDC）で購入    src/upst
 | B（自前ホスト） | 予備として実装のみ（`src/facilitator-server.ts`、`npm run facilitator:serve`） | x402 の参照実装（`@x402/evm`）を使用。CDP が使えなくなったときに `FACILITATOR_URL` を向け替える。relayer ウォレット `0x41ff0e098Cd675ACe5F1BdCf58042cDE9e802BBd`（Polygon、POL 0.5 入金済み・未使用） |
 | Phase 0（Amoy） | **実施しない** | 指示書2の決定。mainnet を少額で行った |
 | 実行場所 | ゲートウェイは Vercel Functions（`https://jpyc.x402jp.com`）、買い手は GitHub Actions | 指示書4 §2（それまではコンテナ内の localhost） |
-| 関数間で共有する状態 | Vercel Blob（nonce の使用済み記録・支払者のブロック・上流の日次支出） | メモリ・ファイルは関数ごとに別になるので使わない。Upstash は増やさず、既に使っている Blob で足りる（nonce は上書き禁止の作成で一意、支出は ETag の比較で加算） |
+| 関数間で共有する状態 | Vercel Blob（nonce の使用済み記録・支払者のブロック・上流の日次支出） | メモリ・ファイルは関数ごとに別になるので使わない。Upstash は増やさず、既に使っている Blob で足りる。nonce と支出は、先に作っておいた台帳（`npm run state:init`）を ETag 比較つきの書き込み（ifMatch）でだけ更新するので、同じ署名が同時に届いても通るのは 1 回だけ（「無ければ作る」の排他は文書で保証されていないので判定に使わない）。本番の Blob でも `npm run state:race-check` で確認する |
 | 上流の支出上限 | 1 日（JST）2 USDC、超えたら 503 | 指示書4 §2 |
 | 定期実行 | GitHub Actions の cron（毎日 06:30 JST、1 日 10 JPYC・30 日間） | 指示書3の決定。下の「定期実行」を参照 |
 

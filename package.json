@@ -21,7 +21,9 @@
     "facilitator:serve": "tsx scripts/facilitator-serve.ts",
     "balances": "tsx scripts/balances.ts",
     "report:weekly": "tsx scripts/weekly-report.ts",
-    "vercel:stage": "node scripts/vercel-stage.mjs"
+    "vercel:stage": "node scripts/vercel-stage.mjs",
+    "state:init": "tsx scripts/state-init.ts",
+    "state:race-check": "tsx scripts/blob-race-check.ts"
   },
   "dependencies": {
     "@coinbase/x402": "2.1.0",

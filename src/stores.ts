@@ -9,8 +9,8 @@
 import { BlobPreconditionFailedError, get, put } from '@vercel/blob';
 
 export interface SharedStore {
-  /** 初めてなら記録して true、既にあれば false */
-  claimNonce(key: string): Promise<boolean>;
+  /** 初めてなら記録して true、既にあれば false。expiresAtMs を過ぎた記録は消してよい */
+  claimNonce(key: string, expiresAtMs?: number): Promise<boolean>;
   isBlocked(payer: string, nowMs: number): Promise<boolean>;
   block(payer: string, untilMs: number, reason: string): Promise<void>;
   /** day の支出に micro を足して cap 以下なら true（足した状態にする）。超えるなら false（足さない） */
@@ -19,6 +19,8 @@ export interface SharedStore {
   releaseSpend(day: string, micro: bigint): Promise<void>;
   spent(day: string): Promise<bigint>;
 }
+
+const safe = (s: string) => s.toLowerCase().replace(/[^0-9a-z:_-]/g, '_');
 
 export class MemorySharedStore implements SharedStore {
   readonly nonces = new Set<string>();
@@ -51,34 +53,118 @@ export class MemorySharedStore implements SharedStore {
   }
 }
 
-const safe = (s: string) => s.toLowerCase().replace(/[^0-9a-z:_-]/g, '_');
+/** Blob の読み書き（テストで差し替える）。put は ifMatch があればその ETag のときだけ、無ければ「まだ無いときだけ」作る */
+export interface BlobBackend {
+  load(path: string): Promise<{ text: string; etag: string } | null>;
+  put(path: string, text: string, cond: { ifMatch: string } | { create: true }): Promise<void>;
+}
 
-/** Vercel Blob（private）。作成の排他（allowOverwrite:false）と ETag の比較（ifMatch）で、複数の関数から同時に書いても壊れない */
-export class BlobSharedStore implements SharedStore {
-  constructor(private readonly token: string, private readonly prefix = 'state') {}
+/** 条件が合わずに書けなかった（他の関数が先に書いた） */
+export class WriteConflict extends Error {}
 
-  private async load(path: string): Promise<{ text: string; etag?: string } | null> {
+export class VercelBlobBackend implements BlobBackend {
+  constructor(private readonly token: string) {}
+  async load(path: string) {
     const r = await get(path, { access: 'private', useCache: false, token: this.token });
     if (!r || r.statusCode !== 200) return null;
     return { text: await new Response(r.stream).text(), etag: r.blob.etag };
   }
-
-  private isConflict(e: unknown) {
-    return e instanceof BlobPreconditionFailedError || /already exists|precondition/i.test(String((e as Error)?.message));
-  }
-
-  async claimNonce(key: string) {
+  async put(path: string, text: string, cond: { ifMatch: string } | { create: true }) {
     try {
-      await put(`${this.prefix}/nonce/${safe(key)}`, '1', { access: 'private', token: this.token, addRandomSuffix: false, allowOverwrite: false, contentType: 'text/plain' });
-      return true;
+      await put(path, text, {
+        access: 'private', token: this.token, addRandomSuffix: false, contentType: 'application/json',
+        ...('ifMatch' in cond ? { ifMatch: cond.ifMatch } : { allowOverwrite: false }),
+      });
     } catch (e) {
-      if (this.isConflict(e)) return false;
+      if (e instanceof BlobPreconditionFailedError || /already exists|precondition/i.test(String((e as Error)?.message))) throw new WriteConflict(String(e));
       throw e;
     }
   }
+}
+
+/** nonce の台帳の数。同じ nonce は必ず同じ台帳に入る */
+export const NONCE_SHARDS = 16;
+
+const shardOf = (key: string) => {
+  let h = 2166136261;
+  for (const c of key) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0;
+  return h % NONCE_SHARDS;
+};
+
+/**
+ * Vercel Blob（private）での共有状態。
+ *
+ * 同じ署名が同時に 2 回届いても上流の仕入れが 1 回だけになるよう、nonce の記録は ETag 比較つきの書き込み（ifMatch）だけで行う。
+ * 「無ければ作る」（allowOverwrite: false）は同時に来たときの排他が文書で保証されていないので、判定には使わない。
+ * そのために、nonce の台帳（state/nonces-0..15.json）と支出の台帳（state/spend.json）はデプロイ前に作っておく（npm run state:init）。
+ * 台帳が無いときだけ作成を試すが、作成のあとは必ず読み直して ifMatch で書く。
+ *
+ * 台帳の中身は { key: 期限(ms) }。期限（validBefore + 余裕）を過ぎた nonce はチェーン側でも通らないので、書くたびに消す。
+ */
+export class BlobSharedStore implements SharedStore {
+  private readonly backend: BlobBackend;
+  constructor(tokenOrBackend: string | BlobBackend, private readonly prefix = 'state') {
+    this.backend = typeof tokenOrBackend === 'string' ? new VercelBlobBackend(tokenOrBackend) : tokenOrBackend;
+  }
+
+  static ledgerPaths(prefix = 'state') {
+    return [...Array.from({ length: NONCE_SHARDS }, (_, i) => `${prefix}/nonces-${i}.json`), `${prefix}/spend.json`];
+  }
+
+  /** 台帳が無ければ空で作る（npm run state:init）。作った数を返す */
+  async init(): Promise<number> {
+    let n = 0;
+    for (const p of BlobSharedStore.ledgerPaths(this.prefix)) {
+      if (await this.backend.load(p)) continue;
+      try {
+        await this.backend.put(p, '{}', { create: true });
+        n++;
+      } catch (e) {
+        if (!(e instanceof WriteConflict)) throw e;
+      }
+    }
+    return n;
+  }
+
+  /** 台帳を読んで f で書き換え、ETag が変わっていなければ書く。他の関数と競合したら読み直してやり直す */
+  private async update<T>(path: string, f: (cur: Record<string, any>) => { next?: Record<string, any>; result: T }): Promise<T> {
+    for (let attempt = 0; attempt < 12; attempt++) {
+      let cur = await this.backend.load(path);
+      if (!cur) {
+        try {
+          await this.backend.put(path, '{}', { create: true });
+        } catch (e) {
+          if (!(e instanceof WriteConflict)) throw e;
+        }
+        cur = await this.backend.load(path);
+        if (!cur) throw new Error(`ledger ${path} missing`);
+      }
+      const { next, result } = f(JSON.parse(cur.text || '{}'));
+      if (!next) return result;
+      try {
+        await this.backend.put(path, JSON.stringify(next), { ifMatch: cur.etag });
+        return result;
+      } catch (e) {
+        if (!(e instanceof WriteConflict)) throw e;
+        await new Promise((r) => setTimeout(r, 30 * 2 ** Math.min(attempt, 5) + Math.random() * 50));
+      }
+    }
+    throw new Error(`ledger ${path}: too many conflicts`);
+  }
+
+  async claimNonce(key: string, expiresAtMs = Date.now() + 15 * 60_000, nowMs = Date.now()) {
+    const k = key.toLowerCase();
+    return this.update(`${this.prefix}/nonces-${shardOf(k)}.json`, (cur) => {
+      if (Number(cur[k] ?? 0) > nowMs) return { result: false };
+      const next: Record<string, number> = {};
+      for (const [kk, v] of Object.entries(cur)) if (Number(v) > nowMs) next[kk] = Number(v);
+      next[k] = expiresAtMs;
+      return { next, result: true };
+    });
+  }
 
   async isBlocked(payer: string, nowMs: number) {
-    const cur = await this.load(`${this.prefix}/block/${safe(payer)}.json`);
+    const cur = await this.backend.load(`${this.prefix}/block/${safe(payer)}.json`);
     if (!cur) return false;
     try {
       return Number(JSON.parse(cur.text).until) > nowMs;
@@ -88,30 +174,28 @@ export class BlobSharedStore implements SharedStore {
   }
 
   async block(payer: string, untilMs: number, reason: string) {
-    await put(`${this.prefix}/block/${safe(payer)}.json`, JSON.stringify({ until: untilMs, reason }), {
-      access: 'private', token: this.token, addRandomSuffix: false, allowOverwrite: true, contentType: 'application/json',
-    });
+    // ブロックは上書きでよい（どちらが勝っても 24 時間ブロックされる）
+    const path = `${this.prefix}/block/${safe(payer)}.json`;
+    const body = JSON.stringify({ until: untilMs, reason });
+    const cur = await this.backend.load(path);
+    try {
+      await this.backend.put(path, body, cur ? { ifMatch: cur.etag } : { create: true });
+    } catch (e) {
+      if (!(e instanceof WriteConflict)) throw e;
+    }
   }
 
-  private async updateSpend(day: string, f: (cur: bigint) => bigint | null): Promise<boolean> {
-    const path = `${this.prefix}/spend/${safe(day)}.json`;
-    for (let attempt = 0; attempt < 10; attempt++) {
-      const cur = await this.load(path);
-      const value = cur ? BigInt(JSON.parse(cur.text).micro) : 0n;
-      const next = f(value);
-      if (next === null) return false;
-      try {
-        await put(path, JSON.stringify({ micro: next.toString() }), {
-          access: 'private', token: this.token, addRandomSuffix: false, contentType: 'application/json',
-          ...(cur?.etag ? { ifMatch: cur.etag } : { allowOverwrite: false }),
-        });
-        return true;
-      } catch (e) {
-        if (!this.isConflict(e)) throw e;
-        await new Promise((r) => setTimeout(r, 40 * 2 ** attempt + Math.random() * 40));
-      }
-    }
-    throw new Error('spend counter: too many conflicts');
+  private updateSpend(day: string, f: (cur: bigint) => bigint | null) {
+    return this.update(`${this.prefix}/spend.json`, (cur) => {
+      const value = BigInt(cur[day] ?? '0');
+      const v = f(value);
+      if (v === null) return { result: false };
+      // 直近 14 日分だけ残す
+      const days = Object.keys(cur).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort().slice(-13);
+      const next: Record<string, string> = Object.fromEntries(days.filter((d) => d !== day).map((d) => [d, String(cur[d])]));
+      next[day] = v.toString();
+      return { next, result: true };
+    });
   }
 
   reserveSpend(day: string, micro: bigint, capMicro: bigint) {
@@ -123,7 +207,7 @@ export class BlobSharedStore implements SharedStore {
   }
 
   async spent(day: string) {
-    const cur = await this.load(`${this.prefix}/spend/${safe(day)}.json`);
-    return cur ? BigInt(JSON.parse(cur.text).micro) : 0n;
+    const cur = await this.backend.load(`${this.prefix}/spend.json`);
+    return cur ? BigInt(JSON.parse(cur.text || '{}')[day] ?? '0') : 0n;
   }
 }
