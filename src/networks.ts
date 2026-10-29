@@ -32,7 +32,7 @@ export const NETWORK_SPECS: Record<JpycNetwork, NetworkSpec> = {
   [ETHEREUM]: { network: ETHEREUM, label: 'Ethereum', chain: mainnet, defaultRpc: 'https://ethereum-rpc.publicnode.com', key: 'ETHEREUM', facilitator: 'cdp' },
 };
 
-export const DEFAULT_ENABLED_NETWORKS: JpycNetwork[] = [POLYGON_MAINNET, AVALANCHE, KAIA];
+export const DEFAULT_ENABLED_NETWORKS: JpycNetwork[] = [POLYGON_MAINNET, AVALANCHE];
 
 export function rpcUrlOf(network: JpycNetwork, env: NodeJS.ProcessEnv = process.env): string {
   const spec = NETWORK_SPECS[network];

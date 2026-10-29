@@ -22,9 +22,11 @@ test('買い手の鍵はゲートウェイに置かない・poc-card-credits の
   assert.throws(() => loadGatewayConfig({ ...base, GATEWAY_WALLET_SECRET: 'k' }), /different key/);
 });
 
-test('チェーン：既定は Polygon（CDP）・Avalanche・Kaia（自前ホスト、チェーンごとに別の relayer 鍵）', () => {
+test('チェーン：既定は Polygon（CDP）・Avalanche（自前ホスト）。Kaia は指定したときだけ（チェーンごとに別の relayer 鍵）', () => {
   const relayers = { RELAYER_PRIVATE_KEY_AVALANCHE: '0x' + '1'.repeat(64), RELAYER_PRIVATE_KEY_KAIA: '0x' + '2'.repeat(64) };
-  const all = { ...base, ENABLED_NETWORKS: '' };
+  const def = loadGatewayConfig({ ...base, ENABLED_NETWORKS: '', RELAYER_PRIVATE_KEY_AVALANCHE: relayers.RELAYER_PRIVATE_KEY_AVALANCHE });
+  assert.deepEqual(def.networks.map((n) => n.network), ['eip155:137', 'eip155:43114']);
+  const all = { ...base, ENABLED_NETWORKS: 'eip155:137,eip155:43114,eip155:8217' };
   const c = loadGatewayConfig({ ...all, ...relayers });
   assert.deepEqual(c.networks.map((n) => [n.network, n.facilitator]), [['eip155:137', 'cdp'], ['eip155:43114', 'self'], ['eip155:8217', 'self']]);
   assert.throws(() => loadGatewayConfig({ ...all, RELAYER_PRIVATE_KEY_KAIA: relayers.RELAYER_PRIVATE_KEY_KAIA }), /RELAYER_PRIVATE_KEY_AVALANCHE/);

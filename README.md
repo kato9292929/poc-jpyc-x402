@@ -26,7 +26,7 @@ JIN（jin.x402jp.com）を既存の x402（Solana / USDC）で購入    src/upst
 
 | 項目 | 決定 | 理由・根拠 |
 |---|---|---|
-| 対象チェーン | Polygon（`eip155:137`、CDP）・Avalanche（`eip155:43114`、自前）・Kaia（`eip155:8217`、自前）。Ethereum は無効 | 指示書4 §4。CDP の `/supported` の exact は 137 のみ対応（43114・8217・1 は無い）。Ethereum は「CDP が対応していれば」の条件なので無効。JPYC の domain は 4 チェーンとも資金なしの simulate で確認（2026-10-29） |
+| 対象チェーン | Polygon（`eip155:137`、CDP）・Avalanche（`eip155:43114`、自前）。Kaia は外した（指示により。`ENABLED_NETWORKS` に足せば使える）、Ethereum は無効 | 指示書4 §4。CDP の `/supported` の exact は 137 のみ対応（43114・8217・1 は無い）。Ethereum は「CDP が対応していれば」の条件なので無効。JPYC の domain は 4 チェーンとも資金なしの simulate で確認（2026-10-29） |
 | 販売エンドポイント・価格 | `/jin/latest`（0）・`/jin/series`（2 JPYC）・`/jin/movers`（3 JPYC）・`/osd/catalyst/{ticker}`（1 JPYC、上流 0.001 USDC） | `PRICE_SERIES_JPYC` / `PRICE_MOVERS_JPYC` / `PRICE_OSD_JPYC` で変更可。上流の 402 の額が想定と違えば仕入れない |
 | 処理の順番 | verify → 上流を仕入れ → settle → データを返す（2026-10-30〜） | 指示書4 §1。上流で落ちたら settle しない（買い手の JPYC は動かない）。上流が取れて settle が失敗したらデータは返さず `settle_failed_after_upstream`、その支払者を 24 時間ブロック |
 | JPYC の EIP-712 domain | `name: "JPY Coin"` / `version: "1"` | mainnet・Amoy の両方で、この domain の署名をコントラクトが受け入れることを確認（`npm run jpyc:domain-check`）。コントラクトに `version()` は無い |
