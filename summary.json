@@ -1,43 +1,47 @@
 {
-  "updated_at": "2026-10-29T01:10:04.331Z",
+  "updated_at": "2026-10-30T01:17:24.021Z",
   "period": {
     "start_jst": "2026-10-25",
     "until_jst": "2026-11-23"
   },
   "facilitator": "cdp",
   "network": "eip155:137",
-  "days_run": 5,
-  "payments": 20,
-  "ok": 19,
-  "success_rate": 0.95,
+  "days_run": 6,
+  "payments": 24,
+  "ok": 23,
+  "success_rate": 0.9583,
   "by_status": {
-    "ok": 19,
+    "ok": 23,
     "upstream_failed": 1
   },
   "by_endpoint": {
     "/jin/series": {
-      "payments": 10,
-      "ok": 10
+      "payments": 12,
+      "ok": 12
     },
     "/jin/movers": {
-      "payments": 10,
-      "ok": 9
+      "payments": 12,
+      "ok": 11
     }
   },
   "failures": {
     "jpyc_not_received": 0,
     "upstream_before_payment": 0,
     "upstream_after_payment": 1,
-    "upstream_paid_no_data": 0
+    "upstream_paid_no_data": 0,
+    "settle_failed_after_upstream": 0
   },
   "settle_ms": {
-    "median": 2464,
-    "max": 3965,
-    "samples": 20
+    "median": 2683,
+    "max": 5857,
+    "samples": 24
   },
-  "jpyc_received": 50,
-  "upstream_usdc_spent": 0.28,
-  "cdp_gas_pol": "0.867311736075182932",
+  "jpyc_received": 60,
+  "upstream_usdc_spent": 0.34,
+  "cdp_gas_pol": "1.041552832201165984",
+  "gas_by_network": {
+    "eip155:137": "1.041552832201165984"
+  },
   "days": {
     "2026-10-25": {
       "payments": 4,
@@ -49,12 +53,16 @@
         "jpyc_not_received": 0,
         "upstream_before_payment": 0,
         "upstream_after_payment": 0,
-        "upstream_paid_no_data": 0
+        "upstream_paid_no_data": 0,
+        "settle_failed_after_upstream": 0
       },
       "jpyc": 10,
       "upstream_usdc": 0.06,
       "gas_wei": "173163697519972860",
-      "gas_txs": 4
+      "gas_txs": 4,
+      "gas_by_network": {
+        "eip155:137": "173163697519972860"
+      }
     },
     "2026-10-26": {
       "payments": 4,
@@ -67,12 +75,16 @@
         "jpyc_not_received": 0,
         "upstream_before_payment": 0,
         "upstream_after_payment": 1,
-        "upstream_paid_no_data": 0
+        "upstream_paid_no_data": 0,
+        "settle_failed_after_upstream": 0
       },
       "jpyc": 10,
       "upstream_usdc": 0.04,
       "gas_wei": "176920753986045624",
-      "gas_txs": 4
+      "gas_txs": 4,
+      "gas_by_network": {
+        "eip155:137": "176920753986045624"
+      }
     },
     "2026-10-27": {
       "payments": 4,
@@ -84,12 +96,16 @@
         "jpyc_not_received": 0,
         "upstream_before_payment": 0,
         "upstream_after_payment": 0,
-        "upstream_paid_no_data": 0
+        "upstream_paid_no_data": 0,
+        "settle_failed_after_upstream": 0
       },
       "jpyc": 10,
       "upstream_usdc": 0.06,
       "gas_wei": "175714099268828576",
-      "gas_txs": 4
+      "gas_txs": 4,
+      "gas_by_network": {
+        "eip155:137": "175714099268828576"
+      }
     },
     "2026-10-28": {
       "payments": 4,
@@ -101,12 +117,16 @@
         "jpyc_not_received": 0,
         "upstream_before_payment": 0,
         "upstream_after_payment": 0,
-        "upstream_paid_no_data": 0
+        "upstream_paid_no_data": 0,
+        "settle_failed_after_upstream": 0
       },
       "jpyc": 10,
       "upstream_usdc": 0.06,
       "gas_wei": "166828943217346680",
-      "gas_txs": 4
+      "gas_txs": 4,
+      "gas_by_network": {
+        "eip155:137": "166828943217346680"
+      }
     },
     "2026-10-29": {
       "payments": 4,
@@ -118,12 +138,37 @@
         "jpyc_not_received": 0,
         "upstream_before_payment": 0,
         "upstream_after_payment": 0,
-        "upstream_paid_no_data": 0
+        "upstream_paid_no_data": 0,
+        "settle_failed_after_upstream": 0
       },
       "jpyc": 10,
       "upstream_usdc": 0.06,
       "gas_wei": "174684242082989192",
-      "gas_txs": 4
+      "gas_txs": 4,
+      "gas_by_network": {
+        "eip155:137": "174684242082989192"
+      }
+    },
+    "2026-10-30": {
+      "payments": 4,
+      "ok": 4,
+      "by_status": {
+        "ok": 4
+      },
+      "failures": {
+        "jpyc_not_received": 0,
+        "upstream_before_payment": 0,
+        "upstream_after_payment": 0,
+        "upstream_paid_no_data": 0,
+        "settle_failed_after_upstream": 0
+      },
+      "jpyc": 10,
+      "upstream_usdc": 0.06,
+      "gas_wei": "174241096125983052",
+      "gas_txs": 4,
+      "gas_by_network": {
+        "eip155:137": "174241096125983052"
+      }
     }
   }
 }
