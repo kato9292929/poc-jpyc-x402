@@ -1,29 +1,29 @@
 {
-  "updated_at": "2026-11-09T01:09:21.381Z",
+  "updated_at": "2026-11-10T03:44:29.107Z",
   "period": {
     "start_jst": "2026-10-25",
     "until_jst": "2026-11-23"
   },
   "facilitator": "cdp",
   "network": "eip155:137",
-  "days_run": 16,
-  "payments": 64,
-  "ok": 59,
-  "success_rate": 0.9219,
+  "days_run": 17,
+  "payments": 68,
+  "ok": 63,
+  "success_rate": 0.9265,
   "by_status": {
-    "ok": 59,
+    "ok": 63,
     "upstream_failed": 1,
     "settle_failed": 1,
     "verify_failed": 3
   },
   "by_endpoint": {
     "/jin/series": {
-      "payments": 32,
-      "ok": 30
+      "payments": 34,
+      "ok": 32
     },
     "/jin/movers": {
-      "payments": 32,
-      "ok": 29
+      "payments": 34,
+      "ok": 31
     }
   },
   "failures": {
@@ -36,13 +36,13 @@
   "settle_ms": {
     "median": 3034,
     "max": 6427,
-    "samples": 61
+    "samples": 65
   },
-  "jpyc_received": 150,
-  "upstream_usdc_spent": 0.89,
-  "cdp_gas_pol": "2.593752265437894996",
+  "jpyc_received": 160,
+  "upstream_usdc_spent": 0.95,
+  "cdp_gas_pol": "2.707180045710430336",
   "gas_by_network": {
-    "eip155:137": "2.593752265437894996"
+    "eip155:137": "2.707180045710430336"
   },
   "days": {
     "2026-10-25": {
@@ -379,6 +379,27 @@
       "gas_txs": 4,
       "gas_by_network": {
         "eip155:137": "175700289565487488"
+      }
+    },
+    "2026-11-10": {
+      "payments": 4,
+      "ok": 4,
+      "by_status": {
+        "ok": 4
+      },
+      "failures": {
+        "jpyc_not_received": 0,
+        "upstream_before_payment": 0,
+        "upstream_after_payment": 0,
+        "upstream_paid_no_data": 0,
+        "settle_failed_after_upstream": 0
+      },
+      "jpyc": 10,
+      "upstream_usdc": 0.06,
+      "gas_wei": "113427780272535340",
+      "gas_txs": 4,
+      "gas_by_network": {
+        "eip155:137": "113427780272535340"
       }
     }
   }
