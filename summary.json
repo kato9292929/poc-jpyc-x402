@@ -1,48 +1,48 @@
 {
-  "updated_at": "2026-11-11T01:24:14.851Z",
+  "updated_at": "2026-11-12T02:24:54.473Z",
   "period": {
     "start_jst": "2026-10-25",
     "until_jst": "2026-11-23"
   },
   "facilitator": "cdp",
   "network": "eip155:137",
-  "days_run": 18,
-  "payments": 72,
-  "ok": 67,
-  "success_rate": 0.9306,
+  "days_run": 19,
+  "payments": 76,
+  "ok": 70,
+  "success_rate": 0.9211,
   "by_status": {
-    "ok": 67,
-    "upstream_failed": 1,
+    "ok": 70,
+    "upstream_failed": 2,
     "settle_failed": 1,
     "verify_failed": 3
   },
   "by_endpoint": {
     "/jin/series": {
-      "payments": 36,
-      "ok": 34
+      "payments": 38,
+      "ok": 36
     },
     "/jin/movers": {
-      "payments": 36,
-      "ok": 33
+      "payments": 38,
+      "ok": 34
     }
   },
   "failures": {
     "jpyc_not_received": 3,
     "upstream_before_payment": 0,
-    "upstream_after_payment": 1,
+    "upstream_after_payment": 2,
     "upstream_paid_no_data": 0,
     "settle_failed_after_upstream": 1
   },
   "settle_ms": {
-    "median": 3043,
+    "median": 3034,
     "max": 6427,
-    "samples": 69
+    "samples": 73
   },
-  "jpyc_received": 170,
-  "upstream_usdc_spent": 1.01,
-  "cdp_gas_pol": "2.883535553480853092",
+  "jpyc_received": 177,
+  "upstream_usdc_spent": 1.05,
+  "cdp_gas_pol": "3.018387463204478084",
   "gas_by_network": {
-    "eip155:137": "2.883535553480853092"
+    "eip155:137": "3.018387463204478084"
   },
   "days": {
     "2026-10-25": {
@@ -421,6 +421,28 @@
       "gas_txs": 4,
       "gas_by_network": {
         "eip155:137": "176355507770422756"
+      }
+    },
+    "2026-11-12": {
+      "payments": 4,
+      "ok": 3,
+      "by_status": {
+        "ok": 3,
+        "upstream_failed": 1
+      },
+      "failures": {
+        "jpyc_not_received": 0,
+        "upstream_before_payment": 0,
+        "upstream_after_payment": 1,
+        "upstream_paid_no_data": 0,
+        "settle_failed_after_upstream": 0
+      },
+      "jpyc": 7,
+      "upstream_usdc": 0.04,
+      "gas_wei": "134851909723624992",
+      "gas_txs": 3,
+      "gas_by_network": {
+        "eip155:137": "134851909723624992"
       }
     }
   }
