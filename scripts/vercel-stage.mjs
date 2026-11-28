@@ -10,7 +10,7 @@ const app = process.argv[2];
 if (!APPS[app]) throw new Error(`usage: node scripts/vercel-stage.mjs ${Object.keys(APPS).join('|')}`);
 const out = join('.vercel-stage', app);
 // vercel link の結果（.vercel/）は残す
-for (const f of ['api', 'vercel.json', 'package.json']) rmSync(join(out, f), { recursive: true, force: true });
+for (const f of ['api', 'vercel.json', 'package.json', 'index.html']) rmSync(join(out, f), { recursive: true, force: true });
 mkdirSync(join(out, 'api'), { recursive: true });
 await build({
   entryPoints: [join('vercel', app, 'entry.ts')],

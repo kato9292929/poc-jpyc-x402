@@ -13,6 +13,7 @@ import { MemoryLogStore } from '../src/logstore/memory.ts';
 import { parseLines } from '../src/logstore/types.ts';
 import { PaymentLogWriter } from '../src/logstore/writer.ts';
 import { loadRoutes } from '../src/routes.ts';
+import type { ConfirmSettlement } from '../src/settle-confirm.ts';
 import { MemorySharedStore } from '../src/stores.ts';
 import type { UpstreamBuyer, UpstreamResult } from '../src/upstream.ts';
 
@@ -74,7 +75,7 @@ class FakeUpstream implements UpstreamBuyer {
   }
 }
 
-function setup(opts: { cap?: bigint } = {}) {
+function setup(opts: { cap?: bigint; confirmSettlement?: ConfirmSettlement } = {}) {
   const events: string[] = [];
   const facs = {
     [POLYGON_MAINNET]: new FakeFacilitator(events, 'polygon'),
@@ -98,6 +99,7 @@ function setup(opts: { cap?: bigint } = {}) {
     upstreamBaseUrls: { jin: 'https://jin.x402jp.com', osd: 'https://osd.x402jp.com' },
     upstream,
     log,
+    confirmSettlement: opts.confirmSettlement,
     store,
     upstreamDailyCapMicro: opts.cap,
   });
@@ -246,6 +248,28 @@ test('settle が例外（タイムアウト）でも同じく損失として記�
   const res = await buyer(s.gwFetch).pay('https://jpyc.x402jp.com/jin/series');
   assert.equal(res.status, 402);
   assert.match((await s.rows())[0].error, /settle error: timeout/);
+});
+
+test('settle が失敗と返っても、チェーン上で nonce が使用済みなら成功としてデータを返す（2026-11-06 の settlement_pending）', async () => {
+  const seen: string[] = [];
+  const s = setup({ confirmSettlement: async (network, payer, nonce) => (seen.push(`${network}:${payer}:${nonce}`), { used: true, tx: '0x' + 'ab'.repeat(32) }) });
+  s.facs[POLYGON_MAINNET].settleThrows = true;
+  const res = await buyer(s.gwFetch).pay('https://jpyc.x402jp.com/jin/series');
+  assert.equal(res.status, 200);
+  assert.equal(seen.length, 1);
+  const row = (await s.rows())[0];
+  assert.equal(row.status, 'ok');
+  assert.equal(row.settle_tx, '0x' + 'ab'.repeat(32));
+  assert.match(row.error, /confirmed on-chain after: settle error: timeout/);
+  // payer はブロックされない
+  assert.equal((await buyer(s.gwFetch).pay('https://jpyc.x402jp.com/jin/series')).status, 200);
+});
+
+test('settle が失敗し、チェーン上でも nonce が未使用なら、従来どおり損失として記録する', async () => {
+  const s = setup({ confirmSettlement: async () => ({ used: false }) });
+  s.facs[POLYGON_MAINNET].settleThrows = true;
+  assert.equal((await buyer(s.gwFetch).pay('https://jpyc.x402jp.com/jin/series')).status, 402);
+  assert.equal((await s.rows())[0].status, 'settle_failed');
 });
 
 test('上流への支払いの日次上限を超えたら 503（上流も settle も呼ばない）', async () => {
