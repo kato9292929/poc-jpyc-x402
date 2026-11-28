@@ -11,6 +11,7 @@ import { NETWORK_SPECS } from '../networks.ts';
 import { loadRoutes } from '../routes.ts';
 import { MemorySharedStore, type SharedStore } from '../stores.ts';
 import { JinUpstreamBuyer } from '../upstream.ts';
+import { createSettleConfirmer } from '../settle-confirm.ts';
 import { createHandler } from './handler.ts';
 
 /**
@@ -38,6 +39,7 @@ export async function createGatewayApp(cfg: GatewayConfig = loadGatewayConfig(),
     log,
     store,
     upstreamDailyCapMicro: cfg.upstreamDailyCapMicro,
+    confirmSettlement: createSettleConfirmer(Object.fromEntries(cfg.networks.map((n) => [n.network, n.rpcUrl]))),
   });
 
   const app = express();

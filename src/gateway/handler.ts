@@ -6,6 +6,7 @@ import { jstDay, jstIso, toLogLine, type FacilitatorKind, type PaymentLogEntry, 
 import type { PaymentLogWriter } from '../logstore/writer.ts';
 import { buildPaymentRequired, buildRequirements, precheckPayment } from '../payment.ts';
 import { findRoute, usdToUsdcAtomic, type Route } from '../routes.ts';
+import type { ConfirmSettlement } from '../settle-confirm.ts';
 import { MemorySharedStore, type SharedStore } from '../stores.ts';
 import type { UpstreamBuyer } from '../upstream.ts';
 
@@ -43,6 +44,8 @@ export interface HandlerDeps {
   upstreamDailyCapMicro?: bigint;
   /** settle に失敗した payer を受け付けない時間。既定 24 時間 */
   blockMs?: number;
+  /** settle が失敗・例外のとき、チェーン上で送金が済んでいないかを確かめる（無ければ確かめない） */
+  confirmSettlement?: ConfirmSettlement;
   now?: () => Date;
 }
 
@@ -228,6 +231,16 @@ export function createHandler(deps: HandlerDeps) {
     } catch (e) {
       settleError = `settle error: ${(e as Error).message}`;
     }
+    let recoveredFrom: string | undefined;
+    // 失敗と返っても、チェーン上では送金が済んでいることがある（settlement_pending など）。nonce が使用済みなら成功として扱う
+    if (settleError && deps.confirmSettlement) {
+      const c = await timed('confirm', deps.confirmSettlement(network, pre.payer, pre.authorization.nonce)).catch(() => ({ used: false, tx: undefined }));
+      if (c.used) {
+        recoveredFrom = settleError;
+        settled = { ...(settled ?? {}), success: true, transaction: c.tx ?? settled?.transaction ?? 'confirmed_onchain', network } as SettleResponse;
+        settleError = undefined;
+      }
+    }
     if (settleError) {
       // 上流原価の損失。データは返さず、この payer を 24 時間受け付けない
       await store.block(pre.payer, now().getTime() + blockMs, settleError).catch(() => undefined);
@@ -245,7 +258,7 @@ export function createHandler(deps: HandlerDeps) {
     }
 
     // 4. settle に成功したのでデータを返す
-    const h = write({ status: 'ok', payer: pre.payer, settle_tx: settled!.transaction, upstream_tx: up.tx ?? 'unknown', upstream_paid: true, timed: true });
+    const h = write({ status: 'ok', payer: pre.payer, settle_tx: settled!.transaction, upstream_tx: up.tx ?? 'unknown', upstream_paid: true, timed: true, ...(recoveredFrom ? { error: `confirmed on-chain after: ${recoveredFrom}` } : {}) });
     return {
       status: 200,
       headers: {
